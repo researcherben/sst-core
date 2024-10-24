@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -19,6 +19,8 @@
 #include "sst/core/factory.h"
 #include "sst/core/oneshot.h"
 #include "sst/core/profile/componentProfileTool.h"
+#include "sst/core/serialization/serializable_base.h"
+#include "sst/core/serialization/serialize.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/statapi/statbase.h"
 #include "sst/core/statapi/statengine.h"
@@ -45,12 +47,22 @@ class SubComponentSlotInfo;
 class TimeConverter;
 class UnitAlgebra;
 
+
+namespace Core {
+namespace Serialization {
+namespace pvt {
+class SerializeBaseComponentHelper;
+} // namespace pvt
+} // namespace Serialization
+} // namespace Core
+
 /**
  * Main component object for the simulation.
  */
-class BaseComponent
+class BaseComponent : public SST::Core::Serialization::serializable_base
 {
 
+    friend class Component;
     friend class ComponentExtension;
     friend class ComponentInfo;
     friend class SubComponent;
@@ -60,6 +72,9 @@ protected:
     using StatCreateFunction = std::function<Statistics::StatisticBase*(
         BaseComponent*, Statistics::StatisticProcessingEngine*, const std::string& /*type*/,
         const std::string& /*name*/, const std::string& /*subId*/, Params&)>;
+
+    // For serialization only
+    BaseComponent();
 
 public:
     BaseComponent(ComponentId_t id);
@@ -352,7 +367,19 @@ protected:
         }
     }
 
+    void initiateInteractive(const std::string& msg);
+
 private:
+    ImplementSerializable(SST::BaseComponent)
+    void serialize_order(SST::Core::Serialization::serializer& ser) override;
+
+
+    /**
+       Handles the profile points, default time base, handler tracking
+       and checkpointing.
+     */
+    void registerClock_impl(TimeConverter* tc, Clock::HandlerBase* handler, bool regAll);
+
     template <typename T>
     Statistics::Statistic<T>*
     createStatistic(SST::Params& params, StatisticId_t id, const std::string& name, const std::string& statSubId)
@@ -852,14 +879,6 @@ protected:
 
     bool doesSubComponentExist(const std::string& type);
 
-    /* Get the Simulation */
-#if !SST_BUILDING_CORE
-    [[deprecated("getSimulation is deprecated because the Simulation object is being removed as part of the public API "
-                 "and simulation.h will be removed in SST 14")]]
-#endif
-    Simulation*
-    getSimulation() const;
-
     // Does the statisticName exist in the ElementInfoStatistic
     bool    doesComponentInfoStatisticExist(const std::string& statisticName) const;
     // Return the EnableLevel for the statisticName from the ElementInfoStatistic
@@ -870,9 +889,16 @@ protected:
     std::vector<Profile::ComponentProfileTool*> getComponentProfileTools(const std::string& point);
 
 private:
-    ComponentInfo*   my_info = nullptr;
-    Simulation_impl* sim_    = nullptr;
-    bool             isExtension;
+    friend class Core::Serialization::pvt::SerializeBaseComponentHelper;
+
+
+    ComponentInfo*   my_info     = nullptr;
+    Simulation_impl* sim_        = nullptr;
+    bool             isExtension = false;
+
+    // Need to track clock handlers for checkpointing.  We need to
+    // know what clock handlers we have registered with the core
+    std::vector<Clock::HandlerBase*> clock_handlers;
 
     void  addSelfLink(const std::string& name);
     Link* getLinkFromParentSharedPort(const std::string& port);
@@ -1076,6 +1102,61 @@ public:
         }
     }
 };
+
+namespace Core {
+namespace Serialization {
+
+namespace pvt {
+
+class SerializeBaseComponentHelper
+{
+public:
+    static void size_basecomponent(serializable_base* s, serializer& ser);
+
+    static void pack_basecomponent(serializable_base* s, serializer& ser);
+
+    static void unpack_basecomponent(serializable_base*& s, serializer& ser);
+
+    static void map_basecomponent(serializable_base*& s, serializer& ser, const char* name);
+};
+
+} // namespace pvt
+
+
+template <class T>
+class serialize_impl<T*, typename std::enable_if<std::is_base_of<SST::BaseComponent, T>::value>::type>
+{
+    template <class A>
+    friend class serialize;
+    void operator()(T*& s, serializer& ser)
+    {
+        serializable_base* sp = static_cast<serializable_base*>(s);
+        switch ( ser.mode() ) {
+        case serializer::SIZER:
+            pvt::SerializeBaseComponentHelper::size_basecomponent(sp, ser);
+            break;
+        case serializer::PACK:
+            pvt::SerializeBaseComponentHelper::pack_basecomponent(sp, ser);
+            break;
+        case serializer::UNPACK:
+            pvt::SerializeBaseComponentHelper::unpack_basecomponent(sp, ser);
+            break;
+        case serializer::MAP:
+            // Add your code here
+            break;
+        }
+        s = static_cast<T*>(sp);
+    }
+
+    void operator()(T*& s, serializer& ser, const char* name)
+    {
+        serializable_base* sp = static_cast<serializable_base*>(s);
+        pvt::SerializeBaseComponentHelper::map_basecomponent(sp, ser, name);
+    }
+};
+
+} // namespace Serialization
+} // namespace Core
 
 } // namespace SST
 

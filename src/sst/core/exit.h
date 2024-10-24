@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -36,8 +36,8 @@ class Exit : public Action
 public:
     /**
      * Create a new ExitEvent
-     * @param sim - Simulation Object
-     * @param single_rank - True if there are no parallel ranks
+     * @param sim Simulation object
+     * @param single_rank True if there are no parallel ranks
      *
      *  Exit needs to register a handler during constructor time, which
      * requires a simulation object.  But the simulation class creates
@@ -56,13 +56,30 @@ public:
     bool refDec(ComponentId_t, uint32_t thread);
 
     unsigned int getRefCount();
-    SimTime_t    getEndTime() { return end_time; }
-    void         setEndTime(SimTime_t time) { end_time = time; }
 
+    /** Gets the end time of the simulation
+     * @return Time when simulation ends
+     */
+    SimTime_t getEndTime() { return end_time; }
+
+    /** Stores the time the simulation has ended
+     * @param time Current simulation time
+     * @return void
+     */
+    void setEndTime(SimTime_t time) { end_time = time; }
+
+    /** Computes the end time of the simulation
+     * @return End time of the simulation
+     */
     SimTime_t computeEndTime();
     void      execute(void) override;
     void      check();
 
+    /**
+     * @param header String to preface the exit action log
+     * @param out SST Output logger object
+     * @return void
+     */
     void print(const std::string& header, Output& out) const override
     {
         out.output(
@@ -70,8 +87,16 @@ public:
             getPriority());
     }
 
+
     unsigned int getGlobalCount() { return global_count; }
 
+    /**
+     *
+     * TODO to enable different partitioning on restart, will need to associate m_thread_counts and
+     * m_idSet back to components so that a new Exit event can be generated on restart
+     */
+    void serialize_order(SST::Core::Serialization::serializer& ser) override;
+    ImplementSerializable(SST::Exit)
 private:
     Exit() {}                    // for serialization only
     Exit(const Exit&);           // Don't implement

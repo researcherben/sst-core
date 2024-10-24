@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -60,12 +60,18 @@ public:
     template <typename classT, typename dataT = void>
     using Handler = SSTHandler<void, Event*, classT, dataT>;
 
+    /**
+       New style (checkpointable) SSTHandler
+    */
+    template <typename classT, auto funcT, typename dataT = void>
+    using Handler2 = SSTHandler2<void, Event*, classT, dataT, funcT>;
+
     /** Type definition of unique identifiers */
     typedef std::pair<uint64_t, int> id_type;
     /** Constant, default value for id_types */
     static const id_type             NO_ID;
 
-    Event() : Activity()
+    Event() : Activity(), delivery_info(0)
     {
         setPriority(EVENTPRIORITY);
 #if __SST_DEBUG_EVENT_TRACKING__
@@ -113,6 +119,8 @@ public:
 
 #endif
 
+    bool isEvent() final { return true; }
+
     void serialize_order(SST::Core::Serialization::serializer& ser) override
     {
         Activity::serialize_order(ser);
@@ -139,6 +147,7 @@ private:
     friend class NullEvent;
     friend class RankSync;
     friend class ThreadSync;
+    friend class TimeVortex;
 
 
     /** Cause this event to fire */
@@ -155,6 +164,7 @@ private:
        For links that are going to a sync, the delivery_info is used
        on the remote side to send the event on the proper link.  For
        local links, delivery_info contains the delivery functor.
+       @return void
      */
     inline void setDeliveryInfo(LinkId_t tag, uintptr_t delivery_info)
     {

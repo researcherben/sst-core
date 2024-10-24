@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -136,6 +136,29 @@ Params::print_all_params(Output& out, const std::string& prefix) const
     }
 }
 
+std::string
+Params::toString(const std::string& prefix) const
+{
+    std::stringstream str;
+    int               level = 0;
+    for ( auto map : data ) {
+        if ( level == 0 ) {
+            if ( !map->empty() ) str << "Local params:" << std::endl;
+            level++;
+        }
+        else if ( level == 1 ) {
+            str << "Global params:" << std::endl;
+            level++;
+        }
+
+        for ( auto value : *map ) {
+            str << "  " << prefix << "key=" << keyMapReverse[value.first] << ", value=" << value.second << std::endl;
+        }
+    }
+    return str.str();
+}
+
+
 void
 Params::insert(const std::string& key, const std::string& value, bool overwrite)
 {
@@ -260,6 +283,9 @@ Params::serialize_order(SST::Core::Serialization::serializer& ser)
         ser& globals;
         for ( auto x : globals )
             data.push_back(&global_params[x]);
+        break;
+    case SST::Core::Serialization::serializer::MAP:
+        // This function not called in mapping mode
         break;
     }
 }

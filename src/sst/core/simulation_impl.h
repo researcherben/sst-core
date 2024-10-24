@@ -1,10 +1,10 @@
 // -*- c++ -*-
 
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -20,7 +20,6 @@
 #include "sst/core/output.h"
 #include "sst/core/profile/profiletool.h"
 #include "sst/core/rankInfo.h"
-#include "sst/core/simulation.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/statapi/statengine.h"
 #include "sst/core/unitAlgebra.h"
@@ -41,16 +40,17 @@ namespace SST {
 #define STATALLFLAG            "--ALLSTATS--"
 
 class Activity;
+class CheckpointAction;
 class Component;
 class Config;
 class ConfigGraph;
 class Exit;
 class Factory;
-class SimulatorHeartbeat;
+class InteractiveConsole;
 class Link;
 class LinkMap;
 class Params;
-class SharedRegionManager;
+class RealTimeManager;
 class SimulatorHeartbeat;
 class SyncBase;
 class SyncManager;
@@ -59,66 +59,71 @@ class TimeConverter;
 class TimeLord;
 class TimeVortex;
 class UnitAlgebra;
-class SharedRegionManager;
 
 namespace Statistics {
 class StatisticOutput;
 class StatisticProcessingEngine;
 } // namespace Statistics
 
+namespace Serialization {
+class ObjectMap;
+} // namespace Serialization
+
 /**
  * Main control class for a SST Simulation.
  * Provides base features for managing the simulation
  */
-class Simulation_impl : public Simulation
+class Simulation_impl
 {
 
 public:
+    SST::Core::Serialization::ObjectMap* getComponentObjectMap();
+
     /********  Public API inherited from Simulation ********/
     /** Get the run mode of the simulation (e.g. init, run, both etc) */
-    SimulationRunMode getSimulationMode() const override { return runMode; };
+    SimulationRunMode getSimulationMode() const { return runMode; };
 
     /** Return the current simulation time as a cycle count*/
-    SimTime_t getCurrentSimCycle() const override;
+    SimTime_t getCurrentSimCycle() const;
 
     /** Return the end simulation time as a cycle count*/
-    SimTime_t getEndSimCycle() const override;
+    SimTime_t getEndSimCycle() const;
 
     /** Return the current priority */
-    int getCurrentPriority() const override;
+    int getCurrentPriority() const;
 
     /** Return the elapsed simulation time as a time */
-    UnitAlgebra getElapsedSimTime() const override;
+    UnitAlgebra getElapsedSimTime() const;
 
     /** Return the end simulation time as a time */
-    UnitAlgebra getEndSimTime() const override;
+    UnitAlgebra getEndSimTime() const;
 
     /** Get this instance's parallel rank */
-    RankInfo getRank() const override { return my_rank; }
+    RankInfo getRank() const { return my_rank; }
 
     /** Get the number of parallel ranks in the simulation */
-    RankInfo getNumRanks() const override { return num_ranks; }
+    RankInfo getNumRanks() const { return num_ranks; }
 
     /**
     Returns the output directory of the simulation
     @return Directory in which simulation outputs are placed
     */
-    std::string& getOutputDirectory() override { return output_directory; }
+    std::string& getOutputDirectory() { return output_directory; }
 
     /** Signifies that a library is required for this simulation.
      *  @param name Name of the library
      */
-    virtual void requireLibrary(const std::string& name) override;
+    void requireLibrary(const std::string& name);
 
     /** Causes the current status of the simulation to be printed to stderr.
      * @param fullStatus - if true, call printStatus() on all components as well
      *        as print the base Simulation's status
      */
-    virtual void printStatus(bool fullStatus) override;
+    void printStatus(bool fullStatus);
 
-    virtual double getRunPhaseElapsedRealTime() const override;
-    virtual double getInitPhaseElapsedRealTime() const override;
-    virtual double getCompletePhaseElapsedRealTime() const override;
+    double getRunPhaseElapsedRealTime() const;
+    double getInitPhaseElapsedRealTime() const;
+    double getCompletePhaseElapsedRealTime() const;
 
     /******** End Public API from Simulation ********/
 
@@ -142,16 +147,17 @@ public:
      * @param config - Configuration of the simulation
      * @param my_rank - Parallel Rank of this simulation object
      * @param num_ranks - How many Ranks are in the simulation
+     * @param restart - Whether this simulation is being restarted from a checkpoint (true) or not
      */
-    static Simulation_impl* createSimulation(Config* config, RankInfo my_rank, RankInfo num_ranks);
+    static Simulation_impl* createSimulation(Config* config, RankInfo my_rank, RankInfo num_ranks, bool restart);
 
     /**
      * Used to signify the end of simulation.  Cleans up any existing Simulation Objects
      */
     static void shutdown();
 
-    /** Sets an internal flag for signaling the simulation.  Used internally */
-    static void setSignal(int signal);
+    /** Sets an internal flag for signaling the simulation. Used by signal handler & thread 0. */
+    static void notifySignal();
 
     /** Insert an activity to fire at a specified time */
     void insertActivity(SimTime_t time, Activity* ev);
@@ -171,8 +177,11 @@ public:
     int  performWireUp(ConfigGraph& graph, const RankInfo& myRank, SimTime_t min_part);
     void exchangeLinkInfo();
 
-    /** Set cycle count, which, if reached, will cause the simulation to halt. */
-    void setStopAtCycle(Config* cfg);
+    /** Setup external control actions (forced stops, signal handling */
+    void setupSimActions(Config* cfg, bool restart = false);
+
+    /** Helper for signal string parsing */
+    bool parseSignalString(std::string& arg, std::string& name, Params& params);
 
     /** Perform the init() phase of simulation */
     void initialize();
@@ -182,6 +191,8 @@ public:
 
     /** Perform the setup() and run phases of the simulation. */
     void setup();
+
+    void prepare_for_run();
 
     void run();
 
@@ -263,13 +274,16 @@ public:
     /**
      * Returns true when the Wireup is finished.
      */
-    bool isWireUpFinished() { return wireUpFinished; }
+    bool isWireUpFinished() { return wireUpFinished_; }
 
     uint64_t getTimeVortexMaxDepth() const;
 
     uint64_t getTimeVortexCurrentDepth() const;
 
     uint64_t getSyncQueueDataSize() const;
+
+    /** Return the checkpoint event */
+    CheckpointAction* getCheckpointAction() const { return checkpoint_action_; }
 
     /******** API provided through BaseComponent only ***********/
 
@@ -279,6 +293,9 @@ public:
     TimeConverter* registerClock(const UnitAlgebra& freq, Clock::HandlerBase* handler, int priority);
 
     TimeConverter* registerClock(TimeConverter* tcFreq, Clock::HandlerBase* handler, int priority);
+
+    // registerClock function used during checkpoint/restart
+    void registerClock(SimTime_t factor, Clock::HandlerBase* handler, int priority);
 
     /** Remove a clock handler from the list of active clock handlers */
     void unregisterClock(TimeConverter* tc, Clock::HandlerBase* handler, int priority);
@@ -291,6 +308,16 @@ public:
     /** Returns the next Cycle that the TImeConverter would fire. */
     Cycle_t getNextClockCycle(TimeConverter* tc, int priority = CLOCKPRIORITY);
 
+    /** Gets the clock the handler is registered with, represented by it's factor
+     *
+     * @param handler Clock handler to search for
+     *
+     * @return Factor of TimeConverter for the clock the specified
+     * handler is registered with.  If the handler is not currently
+     * registered with a clock, returns 0.
+     */
+    SimTime_t getClockForHandler(Clock::HandlerBase* handler);
+
     /** Return the Statistic Processing Engine associated with this Simulation */
     Statistics::StatisticProcessingEngine* getStatisticsProcessingEngine(void);
 
@@ -301,8 +328,8 @@ public:
     // To enable main to set up globals
     friend int ::main(int argc, char** argv);
 
-    // Simulation_impl() {}
-    Simulation_impl(Config* config, RankInfo my_rank, RankInfo num_ranks);
+    Simulation_impl() {}
+    Simulation_impl(Config* config, RankInfo my_rank, RankInfo num_ranks, bool restart);
     Simulation_impl(Simulation_impl const&); // Don't Implement
     void operator=(Simulation_impl const&);  // Don't implement
 
@@ -310,6 +337,29 @@ public:
      * @param cycles Frequency which is the base of the TimeConverter
      */
     TimeConverter* minPartToTC(SimTime_t cycles) const;
+
+    std::string initializeCheckpointInfrastructure(const std::string& prefix);
+    void        scheduleCheckpoint();
+
+    /**
+       Write the partition specific checkpoint data
+     */
+    void checkpoint(const std::string& checkpoint_filename);
+
+    /**
+       Append partitions registry information
+     */
+    void checkpoint_append_registry(const std::string& registry_name, const std::string& blob_name);
+
+    /**
+       Write the global data to a binary file and create the registry
+       and write the header info
+     */
+    void checkpoint_write_globals(
+        int checkpoint_id, const std::string& registry_filename, const std::string& globals_filename);
+    void restart(Config* config);
+
+    void initialize_interactive_console(const std::string& type);
 
     /** Factory used to generate the simulation components */
     static Factory* factory;
@@ -333,13 +383,21 @@ public:
     TimeVortex* getTimeVortex() const { return timeVortex; }
 
     /** Emergency Shutdown
-     * Called when a SIGINT or SIGTERM has been seen
+     * Called when a fatal event has occurred
      */
     static void emergencyShutdown();
+
+    /** Signal Shutdown
+     * Called when a signal needs to terminate SST
+     * E.g., SIGINT or SIGTERM has been seen
+     * abnormal indicates whether this was unexpected or not
+     */
+    void signalShutdown(bool abnormal);
+
     /** Normal Shutdown
      */
-    void        endSimulation(void);
-    void        endSimulation(SimTime_t end);
+    void endSimulation(void);
+    void endSimulation(SimTime_t end);
 
     typedef enum {
         SHUTDOWN_CLEAN,     /* Normal shutdown */
@@ -350,7 +408,8 @@ public:
     friend class SyncManager;
 
     TimeVortex*             timeVortex;
-    TimeConverter*          threadMinPartTC;
+    std::string             timeVortexType;  // Required for checkpoint
+    TimeConverter*          threadMinPartTC; // Unused...?
     Activity*               current_activity;
     static SimTime_t        minPart;
     static TimeConverter*   minPartTC;
@@ -362,26 +421,40 @@ public:
     clockMap_t              clockMap;
     oneShotMap_t            oneShotMap;
     static Exit*            m_exit;
-    SimulatorHeartbeat*     m_heartbeat;
+    SimulatorHeartbeat*     m_heartbeat = nullptr;
+    CheckpointAction*       checkpoint_action_;
+    static std::string      checkpoint_directory_;
     bool                    endSim;
     bool                    independent; // true if no links leave thread (i.e. no syncs required)
     static std::atomic<int> untimed_msg_count;
     unsigned int            untimed_phase;
-    volatile sig_atomic_t   lastRecvdSignal;
-    ShutdownMode_t          shutdown_mode;
-    bool                    wireUpFinished;
+    volatile sig_atomic_t   signal_arrived_; // true if a signal has arrived
+    ShutdownMode_t          shutdown_mode_;
+    bool                    wireUpFinished_;
+    RealTimeManager*        real_time_;
+    std::string             interactive_type_  = "";
+    std::string             interactive_start_ = "";
+    InteractiveConsole*     interactive_       = nullptr;
+    bool                    enter_interactive_ = false;
+    std::string             interactive_msg_;
+
+    /**
+       vector to hold offsets of component blobs in checkpoint files
+     */
+    std::vector<std::pair<ComponentId_t, uint64_t>> component_blob_offsets_;
 
     /** TimeLord of the simulation */
     static TimeLord timeLord;
     /** Output */
     static Output   sim_output;
 
+
     /** Statistics Engine */
     SST::Statistics::StatisticProcessingEngine stat_engine;
 
     /** Performance Tracking Information **/
 
-    void intializeProfileTools(const std::string& config);
+    void initializeProfileTools(const std::string& config);
 
     std::map<std::string, SST::Profile::ProfileTool*> profile_tools;
     // Maps the component profile points to profiler names
@@ -489,18 +562,26 @@ public:
     RankInfo my_rank;
     RankInfo num_ranks;
 
-    std::string                 output_directory;
-    static SharedRegionManager* sharedRegionManager;
+    std::string output_directory;
 
-    double run_phase_start_time;
-    double run_phase_total_time;
-    double init_phase_start_time;
-    double init_phase_total_time;
-    double complete_phase_start_time;
-    double complete_phase_total_time;
+    double run_phase_start_time_;
+    double run_phase_total_time_;
+    double init_phase_start_time_;
+    double init_phase_total_time_;
+    double complete_phase_start_time_;
+    double complete_phase_total_time_;
 
     static std::unordered_map<std::thread::id, Simulation_impl*> instanceMap;
-    static std::vector<Simulation_impl*>                         instanceVec;
+    static std::vector<Simulation_impl*>                         instanceVec_;
+
+    /******** Checkpoint/restart tracking data structures ***********/
+    std::map<uintptr_t, Link*>     link_restart_tracking;
+    std::map<uintptr_t, uintptr_t> event_handler_restart_tracking;
+    uint32_t                       checkpoint_id_       = 0;
+    std::string                    checkpoint_prefix_   = "";
+    std::string                    globalOutputFileName = "";
+
+    void printSimulationState();
 
     friend void wait_my_turn_start();
     friend void wait_my_turn_end();

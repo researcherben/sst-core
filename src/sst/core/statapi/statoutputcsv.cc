@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -13,7 +13,6 @@
 
 #include "sst/core/statapi/statoutputcsv.h"
 
-#include "sst/core/simulation_impl.h"
 #include "sst/core/stringize.h"
 
 namespace SST {
@@ -23,7 +22,7 @@ StatisticOutputCSV::StatisticOutputCSV(Params& outputParameters) : StatisticFiel
 {
     m_useCompression = outputParameters.find<bool>("compressed");
     // Announce this output object's name
-    Output& out      = Simulation_impl::getSimulationOutput();
+    Output& out      = getSimulationOutput();
     out.verbose(CALL_INFO, 1, 0, " : StatisticOutputCSV enabled...\n");
     setStatisticOutputName("StatisticOutputCSV");
 }
@@ -31,10 +30,7 @@ StatisticOutputCSV::StatisticOutputCSV(Params& outputParameters) : StatisticFiel
 bool
 StatisticOutputCSV::checkOutputParameters()
 {
-    bool        foundKey;
-    std::string topHeaderFlag;
-    std::string simTimeFlag;
-    std::string rankFlag;
+    bool foundKey;
 
     // Review the output parameters and make sure they are correct, and
     // also setup internal variables
@@ -46,12 +42,9 @@ StatisticOutputCSV::checkOutputParameters()
     // Get the parameters
     m_Separator       = getOutputParameters().find<std::string>("separator", ", ");
     m_FilePath        = getOutputParameters().find<std::string>("filepath", "./StatisticOutput.csv");
-    topHeaderFlag     = getOutputParameters().find<std::string>("outputtopheader", "1");
-    simTimeFlag       = getOutputParameters().find<std::string>("outputsimtime", "1");
-    rankFlag          = getOutputParameters().find<std::string>("outputrank", "1");
-    m_outputTopHeader = ("1" == topHeaderFlag);
-    m_outputSimTime   = ("1" == simTimeFlag);
-    m_outputRank      = ("1" == rankFlag);
+    m_outputTopHeader = getOutputParameters().find<bool>("outputtopheader", true);
+    m_outputSimTime   = getOutputParameters().find<bool>("outputsimtime", true);
+    m_outputRank      = getOutputParameters().find<bool>("outputrank", true);
 
     // Perform some checking on the parameters
     if ( 0 == m_Separator.length() ) {
@@ -89,8 +82,8 @@ StatisticOutputCSV::startOfSimulation()
     FieldInfoArray_t::iterator it_v;
 
     // Set Filename with Rank if Num Ranks > 1
-    if ( 1 < Simulation_impl::getSimulation()->getNumRanks().rank ) {
-        int         rank    = Simulation_impl::getSimulation()->getRank().rank;
+    if ( 1 < getNumRanks().rank ) {
+        int         rank    = getRank().rank;
         std::string rankstr = "_" + std::to_string(rank);
 
         // Search for any extension
@@ -206,14 +199,14 @@ StatisticOutputCSV::implStopOutputEntries()
     // Done with Output, Send a line of data to the file
     if ( true == m_outputSimTime ) {
         // Add the Simulation Time to the front
-        print("%" PRIu64, Simulation_impl::getSimulation()->getCurrentSimCycle());
+        print("%" PRIu64, getCurrentSimCycle());
         print("%s", m_Separator.c_str());
     }
 
     // Done with Output, Send a line of data to the file
     if ( true == m_outputRank ) {
         // Add the Simulation Time to the front
-        print("%d", Simulation_impl::getSimulation()->getRank().rank);
+        print("%d", getRank().rank);
         print("%s", m_Separator.c_str());
     }
 
@@ -282,7 +275,7 @@ StatisticOutputCSV::openFile(void)
         m_gzFile = gzopen(m_FilePath.c_str(), "w");
         if ( nullptr == m_gzFile ) {
             // We got an error of some sort
-            Output out = Simulation_impl::getSimulation()->getSimulationOutput();
+            Output out = getSimulationOutput();
             out.fatal(
                 CALL_INFO, 1, " : StatisticOutputCompressedCSV - Problem opening File %s - %s\n", m_FilePath.c_str(),
                 strerror(errno));
@@ -296,7 +289,7 @@ StatisticOutputCSV::openFile(void)
         m_hFile = fopen(m_FilePath.c_str(), "w");
         if ( nullptr == m_hFile ) {
             // We got an error of some sort
-            Output out = Simulation_impl::getSimulation()->getSimulationOutput();
+            Output out = getSimulationOutput();
             out.fatal(
                 CALL_INFO, 1, " : StatisticOutputCSV - Problem opening File %s - %s\n", m_FilePath.c_str(),
                 strerror(errno));
@@ -363,6 +356,18 @@ StatisticOutputCSV::print(const char* fmt, ...)
         va_end(args);
     }
     return res;
+}
+
+void
+StatisticOutputCSV::serialize_order(SST::Core::Serialization::serializer& ser)
+{
+    StatisticFieldsOutput::serialize_order(ser);
+    ser& m_Separator;
+    ser& m_FilePath;
+    ser& m_outputRank;
+    ser& m_outputSimTime;
+    ser& m_outputTopHeader;
+    ser& m_useCompression;
 }
 
 } // namespace Statistics

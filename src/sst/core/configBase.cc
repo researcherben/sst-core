@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -57,14 +57,47 @@ ConfigBase::parseBoolean(const std::string& arg, bool& success, const std::strin
     }
 }
 
+uint32_t
+ConfigBase::parseWallTimeToSeconds(const std::string& arg, bool& success, const std::string& option)
+{
+    static const char* templates[] = { "%H:%M:%S", "%M:%S", "%S", "%Hh", "%Mm", "%Ss" };
+    const size_t       n_templ     = sizeof(templates) / sizeof(templates[0]);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+    struct tm res = {}; /* This warns on GCC 4.8 due to a bug in GCC */
+#pragma GCC diagnostic pop
+    char*    p;
+    uint32_t seconds;
+
+    for ( size_t i = 0; i < n_templ; i++ ) {
+        memset(&res, '\0', sizeof(res));
+        p = strptime(arg.c_str(), templates[i], &res);
+        if ( p != nullptr && *p == '\0' ) {
+            seconds = res.tm_sec;
+            seconds += res.tm_min * 60;
+            seconds += res.tm_hour * 60 * 60;
+            success = true;
+            return seconds;
+        }
+    }
+    fprintf(
+        stderr, "ERROR: Argument passed to \"%s\" could not be parsed. Argument = [%s]\nValid formats are:\n",
+        option.c_str(), arg.c_str());
+    for ( size_t i = 0; i < n_templ; i++ ) {
+        fprintf(stderr, "\t%s\n", templates[i]);
+    }
+    success = false;
+    // Let caller handle error
+    return 0;
+}
 
 void
 ConfigBase::addOption(
-    struct option opt, const char* argname, const char* desc, std::function<int(const char* arg)> callback, bool header,
-    bool sdl_avail)
+    struct option opt, const char* argname, const char* desc, std::function<int(const char* arg)> callback,
+    std::vector<bool> annotations, std::function<std::string(void)> ext_help)
 {
     // Put this into the options vector
-    options.emplace_back(opt, argname, desc, callback, header, sdl_avail, false);
+    options.emplace_back(opt, argname, desc, callback, false, annotations, ext_help, false);
 
     LongOption& new_option = options.back();
 
@@ -73,6 +106,9 @@ ConfigBase::addOption(
 
     // Increment the number of options
     num_options++;
+
+    // See if there is extended help
+    if ( ext_help ) has_extended_help_ = true;
 
     // See if this is the longest option
     size_t size = 0;
@@ -95,6 +131,18 @@ ConfigBase::addOption(
             short_options_string.append("::");
         }
     }
+
+    // Handle any extra help functions
+    if ( ext_help ) { extra_help_map[opt.name] = ext_help; }
+}
+
+void
+ConfigBase::addHeading(const char* desc)
+{
+    struct option     opt = { "", optional_argument, 0, 0 };
+    std::vector<bool> vec;
+    options.emplace_back(
+        opt, "", desc, std::function<int(const char* arg)>(), true, vec, std::function<std::string(void)>(), false);
 }
 
 std::string
@@ -121,6 +169,7 @@ ConfigBase::addPositionalCallback(std::function<int(int num, const char* arg)> c
     positional_args = callback;
 }
 
+
 int
 ConfigBase::printUsage()
 {
@@ -138,13 +187,20 @@ ConfigBase::printUsage()
         if ( errno == E_OK ) MAX_WIDTH = x;
     }
 
-    const char*    sdl_indicator = suppress_sdl_ ? "" : "(S)";
-    const uint32_t sdl_start     = longest_option + 6;
-    const uint32_t desc_start    = sdl_start + strlen(sdl_indicator) + 1;
-    const uint32_t desc_width    = MAX_WIDTH - desc_start;
+    const uint32_t ann_start  = longest_option + 6;
+    const uint32_t desc_start = ann_start + annotations_.size() + 2;
+    const uint32_t desc_width = MAX_WIDTH - desc_start;
 
-    /* Print usage */
+    /* Print usage prelude */
     fprintf(stderr, "%s", getUsagePrelude().c_str());
+
+    /* Print info about annotations */
+    if ( has_extended_help_ ) { fprintf(stderr, "\nOptions annotated with 'H' have extended help available\n"); }
+    for ( size_t i = 0; i < annotations_.size(); ++i ) {
+        fprintf(stderr, "%s\n", annotations_[i].help.c_str());
+    }
+
+    // Print info about annotations
 
     for ( auto& option : options ) {
         if ( option.header ) {
@@ -164,17 +220,26 @@ ConfigBase::printUsage()
         if ( option.opt.has_arg != no_argument ) { npos += fprintf(stderr, "=%s", option.argname.c_str()); }
         // If we have already gone beyond the description start,
         // description starts on new line
-        if ( npos >= sdl_start ) {
+        if ( npos >= ann_start ) {
             fprintf(stderr, "\n");
             npos = 0;
         }
 
-        // If this can be set in the sdl file, start description with
-        // "(S)"
-        while ( npos < sdl_start ) {
+        // Get to the start of the annotations
+        while ( npos < ann_start ) {
             npos += fprintf(stderr, " ");
         }
-        if ( option.sdl_avail ) { npos += fprintf(stderr, "%s", sdl_indicator); }
+
+        // Print the annotations
+        // First check for extended help
+        npos += fprintf(stderr, "%c", option.ext_help ? 'H' : ' ');
+
+        // Now do the rest of the annotations
+        for ( size_t i = 0; i < annotations_.size(); ++i ) {
+            char c = ' ';
+            if ( option.annotations.size() >= (i + 1) && option.annotations[i] ) c = annotations_[i].annotation;
+            npos += fprintf(stderr, "%c", c);
+        }
 
         const char* text = option.desc.c_str();
         while ( text != nullptr && *text != '\0' ) {
@@ -208,6 +273,25 @@ ConfigBase::printUsage()
 
     return 1; /* Should not continue */
 }
+
+
+int
+ConfigBase::printExtHelp(const std::string& option)
+{
+    if ( suppress_print_ ) return 1;
+
+    if ( extra_help_map.find(option) == extra_help_map.end() ) {
+        fprintf(stderr, "No additional help found for option \"%s\"\n", option.c_str());
+    }
+    else {
+        std::function<std::string(void)>& func = extra_help_map[option];
+        std::string                       help = func();
+        fprintf(stderr, "%s\n", help.c_str());
+    }
+
+    return 1; /* Should not continue */
+}
+
 
 int
 ConfigBase::parseCmdLine(int argc, char* argv[], bool ignore_unknown)
@@ -255,8 +339,8 @@ ConfigBase::parseCmdLine(int argc, char* argv[], bool ignore_unknown)
         my_argc = end_arg_index == 0 ? argc : end_arg_index;
     }
 
-    int ok = 0;
-    while ( 0 == ok ) {
+    int status = 0;
+    while ( 0 == status ) {
         int       option_index = 0;
         const int intC = getopt_long(my_argc, argv, short_options_string.c_str(), sst_long_options, &option_index);
 
@@ -281,29 +365,29 @@ ConfigBase::parseCmdLine(int argc, char* argv[], bool ignore_unknown)
         // is an unknown command
         if ( c == '?' ) {
             // Unknown option
-            if ( !ignore_unknown ) { ok = printUsage(); }
+            if ( !ignore_unknown ) { status = printUsage(); }
         }
         else if ( option_index != 0 ) {
             // Long options
             int real_index = option_map[option_index];
             if ( optarg )
-                ok = options[real_index].callback(optarg);
+                status = options[real_index].callback(optarg);
             else
-                ok = options[real_index].callback("");
-            if ( ok ) options[real_index].set_cmdline = true;
+                status = options[real_index].callback("");
+            if ( !status ) options[real_index].set_cmdline = true;
         }
         else {
             // Short option
             int real_index = short_options[c];
             if ( optarg )
-                ok = options[real_index].callback(optarg);
+                status = options[real_index].callback(optarg);
             else
-                ok = options[real_index].callback("");
-            if ( ok ) options[real_index].set_cmdline = true;
+                status = options[real_index].callback("");
+            if ( !status ) options[real_index].set_cmdline = true;
         }
     }
 
-    if ( ok != 0 ) { return ok; }
+    if ( status != 0 ) { return status; }
 
     /* Handle positional arguments */
     int    pos   = optind;
@@ -318,7 +402,7 @@ ConfigBase::parseCmdLine(int argc, char* argv[], bool ignore_unknown)
         // If we aren't ignoring unknown arguments, we'll get an error
         // above. Otherwise, just ignore all the positional arguments.
         if ( positional_args )
-            ok = positional_args(count, argv[pos++]);
+            status = positional_args(count, argv[pos++]);
         else
             pos++;
     }
@@ -337,8 +421,8 @@ ConfigBase::parseCmdLine(int argc, char* argv[], bool ignore_unknown)
     }
 
     // If everything parsed okay, call the check function
-    if ( ok == 0 ) return checkArgsAfterParsing();
-    return ok;
+    if ( status == 0 ) return checkArgsAfterParsing();
+    return status;
 }
 
 
@@ -348,18 +432,50 @@ ConfigBase::setOptionExternal(const string& entryName, const string& value)
     // NOTE: print outs in this function will not be suppressed
     for ( auto& option : options ) {
         if ( !entryName.compare(option.opt.name) ) {
-            if ( option.sdl_avail ) {
-                // If this was set on the command line, skip it
-                if ( option.set_cmdline ) return false;
-                return option.callback(value.c_str());
-            }
-            else {
-                fprintf(stderr, "ERROR: Option \"%s\" is not available to be set in the SDL file\n", entryName.c_str());
-                exit(-1);
-                return false;
-            }
+            if ( option.set_cmdline ) return false;
+            return option.callback(value.c_str());
         }
     }
+    fprintf(stderr, "ERROR: Unknown configuration entry \"%s\"\n", entryName.c_str());
+    exit(-1);
+    return false;
+}
+
+
+bool
+ConfigBase::wasOptionSetOnCmdLine(const std::string& name)
+{
+    for ( auto& option : options ) {
+        if ( !name.compare(option.opt.name) ) { return option.set_cmdline; }
+    }
+    return false;
+}
+
+
+bool
+ConfigBase::getAnnotation(const std::string& entryName, char annotation)
+{
+    // Need to look for the index of the annotation
+    size_t index = std::numeric_limits<size_t>::max();
+    for ( size_t i = 0; i < annotations_.size(); ++i ) {
+        if ( annotations_[i].annotation == annotation ) { index = i; }
+    }
+
+    if ( index == std::numeric_limits<size_t>::max() ) {
+        fprintf(stderr, "ERROR: Searching for unknown annotation: '%c'\n", annotation);
+        exit(-1);
+    }
+
+    // NOTE: print outs in this function will not be suppressed
+    for ( auto& option : options ) {
+        if ( !entryName.compare(option.opt.name) ) {
+            // Check for the annotation.  If the index is not in the
+            // vector, we assume false
+            if ( option.annotations.size() <= index ) return false;
+            return option.annotations[index];
+        }
+    }
+
     fprintf(stderr, "ERROR: Unknown configuration entry \"%s\"\n", entryName.c_str());
     exit(-1);
     return false;

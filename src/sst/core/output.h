@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -12,7 +12,10 @@
 #ifndef SST_CORE_OUTPUT_H
 #define SST_CORE_OUTPUT_H
 
-#include <string.h>
+#include "sst/core/serialization/serializer_fwd.h"
+
+#include <string>
+#include <vector>
 
 // UNCOMMENT OUT THIS LINE TO ENABLE THE DEBUG METHOD -OR_
 // CHOOSE THE --enable-debug OPTION DURING SST CONFIGURATION
@@ -22,7 +25,6 @@
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
-#include "sst/core/rankInfo.h"
 
 #include <cinttypes>
 #include <cstdio>
@@ -118,7 +120,7 @@ public:
     */
     Output(); // Default constructor
 
-    virtual ~Output();
+    ~Output();
 
     /** Initialize the object after construction
         @param prefix Prefix to be prepended to all strings emitted by calls to
@@ -475,6 +477,8 @@ public:
 
     static Output& getDefaultObject() { return m_defaultObject; }
 
+    void serialize_order(SST::Core::Serialization::serializer& ser);
+
 private:
     friend class TraceFunction;
     // Support Methods
@@ -491,6 +495,24 @@ private:
                uint32_t line, const std::string& file, const std::string& func, const char* format, va_list arg) const;
     void outputprintf(const char* format, va_list arg) const;
 
+    // Versions of outputprintf that takes variable arguments instead of va_list
+    inline void
+    outputprintf(uint32_t line, const std::string& file, const std::string& func, const char* format, ...) const
+    {
+        va_list args;
+        va_start(args, format);
+        outputprintf(line, file, func, format, args);
+        va_end(args);
+    }
+
+    inline void outputprintf(const char* format, ...) const
+    {
+        va_list args;
+        va_start(args, format);
+        outputprintf(format, args);
+        va_end(args);
+    }
+
     friend int ::main(int argc, char** argv);
     static Output& setDefaultObject(
         const std::string& prefix, uint32_t verbose_level, uint32_t verbose_mask, output_location_t location,
@@ -500,10 +522,11 @@ private:
         return getDefaultObject();
     }
 
-    static void setWorldSize(const RankInfo& ri, int mpiRank)
+    static void setWorldSize(int num_ranks, int num_threads, int mpiRank)
     {
-        m_worldSize = ri;
-        m_mpiRank   = mpiRank;
+        m_worldSize_ranks   = num_ranks;
+        m_worldSize_threads = num_threads;
+        m_mpiRank           = mpiRank;
     }
 
     static void setThreadID(std::thread::id mach, uint32_t user) { m_threadMap.insert(std::make_pair(mach, user)); }
@@ -544,22 +567,44 @@ private:
     uint32_t    m_sstLocalFileAccessCount;
 
     static std::unordered_map<std::thread::id, uint32_t> m_threadMap;
-    static RankInfo                                      m_worldSize;
+    static int                                           m_worldSize_ranks;
+    static int                                           m_worldSize_threads;
+    // static RankInfo                                      m_worldSize;
     static int                                           m_mpiRank;
 };
 
-// Class to easily trace function enter and exit
+/**
+ Class to easily trace function enter and exit.  This class is for
+ temporary use during debugging only and is not part of the SST Core
+ stable API (i.e. the class can change at any time).
+
+ NOTE: Output for TraceFunction will only be turned on if the
+ SST_TRACEFUNCTION_ACTIVATE envirnoment variable is set.
+
+ You can also control whether or not an "indent marker" will be used
+ by setting SST_TRACEFUNCTION_INDENT_MARKER. If the environment
+ variable is defined but empty, a | will be used.  If the variable
+ isn't empty, it will use the first character as the indent marker.
+ This will look like:
+
+static void class1::func1() enter function
+| static void class1::func2() enter function
+| static void class1::func2() exit function
+static void class1::func1() exit function
+static void class1::func1() enter function
+| static void class1::func2() enter function
+| static void class1::func2() exit function
+static void class1::func1() exit function
+
+*/
 class TraceFunction
 {
-
     thread_local static int               trace_level;
     thread_local static std::vector<char> indent_array;
 
 public:
     TraceFunction(uint32_t line, const char* file, const char* func, bool print_sim_info = true, bool activate = true);
     ~TraceFunction();
-
-    Output& getOutput() { return output_obj; }
 
     /** Output the message with formatting as specified by the format parameter.
         @param format Format string.  All valid formats for printf are available.
@@ -568,14 +613,16 @@ public:
     void output(const char* format, ...) const __attribute__((format(printf, 2, 3)));
 
 private:
-    Output      output_obj;
-    uint32_t    line;
-    std::string file;
-    std::string function;
-    // uint32_t rank;
-    // uint32_t thread;
-    int         indent_length;
-    bool        active;
+    Output      output_obj_;
+    uint32_t    line_;
+    std::string file_;
+    std::string function_;
+    int         indent_length_;
+    bool        active_;
+
+    // Static to determine if TraceFunction should be active
+    static bool global_active_;
+    static char indent_marker_;
 };
 
 } // namespace SST

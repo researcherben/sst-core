@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -20,6 +20,7 @@
 #include "sst/core/linkMap.h"
 #include "sst/core/profile/clockHandlerProfileTool.h"
 #include "sst/core/profile/eventHandlerProfileTool.h"
+#include "sst/core/serialization/serialize.h"
 #include "sst/core/simulation_impl.h"
 #include "sst/core/statapi/statoutput.h"
 #include "sst/core/stringize.h"
@@ -33,7 +34,10 @@
 
 namespace SST {
 
+BaseComponent::BaseComponent() : SST::Core::Serialization::serializable_base() {}
+
 BaseComponent::BaseComponent(ComponentId_t id) :
+    SST::Core::Serialization::serializable_base(),
     my_info(Simulation_impl::getSimulation()->getComponentInfo(id)),
     sim_(Simulation_impl::getSimulation()),
     isExtension(false)
@@ -106,10 +110,19 @@ BaseComponent::pushValidParams(Params& params, const std::string& type)
     params.pushAllowedKeys(keyset);
 }
 
-TimeConverter*
-BaseComponent::registerClock(const std::string& freq, Clock::HandlerBase* handler, bool regAll)
+void
+BaseComponent::registerClock_impl(TimeConverter* tc, Clock::HandlerBase* handler, bool regAll)
 {
-    TimeConverter* tc = sim_->registerClock(freq, handler, CLOCKPRIORITY);
+
+    // Need to see if I already know about this clock handler
+    bool found = false;
+    for ( auto* x : clock_handlers ) {
+        if ( handler == x ) {
+            found = true;
+            break;
+        }
+    }
+    if ( !found ) clock_handlers.push_back(handler);
 
     // Check to see if there is a profile tool installed
     auto tools = sim_->getProfileTool<Profile::ClockHandlerProfileTool>("clock");
@@ -126,6 +139,14 @@ BaseComponent::registerClock(const std::string& freq, Clock::HandlerBase* handle
         setDefaultTimeBaseForLinks(tc);
         my_info->defaultTimeBase = tc;
     }
+}
+
+
+TimeConverter*
+BaseComponent::registerClock(const std::string& freq, Clock::HandlerBase* handler, bool regAll)
+{
+    TimeConverter* tc = sim_->registerClock(freq, handler, CLOCKPRIORITY);
+    registerClock_impl(tc, handler, regAll);
     return tc;
 }
 
@@ -133,22 +154,7 @@ TimeConverter*
 BaseComponent::registerClock(const UnitAlgebra& freq, Clock::HandlerBase* handler, bool regAll)
 {
     TimeConverter* tc = sim_->registerClock(freq, handler, CLOCKPRIORITY);
-
-    // Check to see if there is a profile tool installed
-    auto tools = sim_->getProfileTool<Profile::ClockHandlerProfileTool>("clock");
-
-    for ( auto* tool : tools ) {
-        ClockHandlerMetaData mdata(my_info->getID(), getName(), getType());
-        // Add the receive profiler to the handler
-        handler->addProfileTool(tool, mdata);
-    }
-
-    // if regAll is true set tc as the default for the component and
-    // for all the links
-    if ( regAll ) {
-        setDefaultTimeBaseForLinks(tc);
-        my_info->defaultTimeBase = tc;
-    }
+    registerClock_impl(tc, handler, regAll);
     return tc;
 }
 
@@ -156,22 +162,7 @@ TimeConverter*
 BaseComponent::registerClock(TimeConverter* tc, Clock::HandlerBase* handler, bool regAll)
 {
     TimeConverter* tcRet = sim_->registerClock(tc, handler, CLOCKPRIORITY);
-
-    // Check to see if there is a profile tool installed
-    auto tools = sim_->getProfileTool<Profile::ClockHandlerProfileTool>("clock");
-
-    for ( auto* tool : tools ) {
-        ClockHandlerMetaData mdata(my_info->getID(), getName(), getType());
-        // Add the receive profiler to the handler
-        handler->addProfileTool(tool, mdata);
-    }
-
-    // if regAll is true set tc as the default for the component and
-    // for all the links
-    if ( regAll ) {
-        setDefaultTimeBaseForLinks(tcRet);
-        my_info->defaultTimeBase = tcRet;
-    }
+    registerClock_impl(tcRet, handler, regAll);
     return tcRet;
 }
 
@@ -635,12 +626,6 @@ BaseComponent::doesSubComponentExist(const std::string& type)
     return Factory::getFactory()->doesSubComponentExist(type);
 }
 
-Simulation*
-BaseComponent::getSimulation() const
-{
-    return sim_;
-}
-
 uint8_t
 BaseComponent::getComponentInfoStatisticEnableLevel(const std::string& statisticName) const
 {
@@ -831,5 +816,140 @@ BaseComponent::getComponentProfileTools(const std::string& point)
 {
     return sim_->getProfileTool<Profile::ComponentProfileTool>(point);
 }
+
+void
+BaseComponent::initiateInteractive(const std::string& msg)
+{
+    sim_->enter_interactive_ = true;
+    sim_->interactive_msg_   = msg;
+}
+
+
+void
+BaseComponent::serialize_order(SST::Core::Serialization::serializer& ser)
+{
+    ser& my_info;
+    ser& isExtension;
+
+    switch ( ser.mode() ) {
+    case SST::Core::Serialization::serializer::SIZER:
+    case SST::Core::Serialization::serializer::PACK:
+    {
+        // Need to serialize each handler
+        std::pair<Clock::HandlerBase*, SimTime_t> p;
+        size_t                                    num_handlers = clock_handlers.size();
+        ser&                                      num_handlers;
+        for ( auto* handler : clock_handlers ) {
+            p.first  = handler;
+            // See if it's currently registered with a clock
+            p.second = sim_->getClockForHandler(handler);
+            ser& p;
+        }
+        break;
+    }
+    case SST::Core::Serialization::serializer::UNPACK:
+    {
+        sim_ = Simulation_impl::getSimulation();
+        std::pair<Clock::HandlerBase*, SimTime_t> p;
+        size_t                                    num_handlers;
+        ser&                                      num_handlers;
+        for ( size_t i = 0; i < num_handlers; ++i ) {
+            ser& p;
+            // Add handler to clock_handlers list
+            clock_handlers.push_back(p.first);
+            // If it was previously registered, register it now
+            if ( p.second ) { sim_->registerClock(p.second, p.first, CLOCKPRIORITY); }
+        }
+        break;
+    }
+    case SST::Core::Serialization::serializer::MAP:
+        // All variables for BaseComponent are mapped in the
+        // SerializeBaseComponentHelper class. Nothing to do here.
+        break;
+    }
+}
+
+namespace Core {
+namespace Serialization {
+namespace pvt {
+
+static const long null_ptr_id = -1;
+
+void
+SerializeBaseComponentHelper::size_basecomponent(serializable_base* s, serializer& ser)
+{
+    long dummy = 0;
+    ser.size(dummy);
+    if ( s ) { s->serialize_order(ser); }
+}
+
+void
+SerializeBaseComponentHelper::pack_basecomponent(serializable_base* s, serializer& ser)
+{
+    if ( s ) {
+        long cls_id = s->cls_id();
+        ser.pack(cls_id);
+        s->serialize_order(ser);
+    }
+    else {
+        long id = null_ptr_id;
+        ser.pack(id);
+    }
+}
+
+void
+SerializeBaseComponentHelper::unpack_basecomponent(serializable_base*& s, serializer& ser)
+{
+    long cls_id;
+    ser.unpack(cls_id);
+    if ( cls_id == null_ptr_id ) { s = nullptr; }
+    else {
+        s = SST::Core::Serialization::serializable_factory::get_serializable(cls_id);
+        ser.report_new_pointer(reinterpret_cast<uintptr_t>(s));
+        s->serialize_order(ser);
+    }
+}
+
+void
+SerializeBaseComponentHelper::map_basecomponent(serializable_base*& s, serializer& ser, const char* name)
+{
+    if ( nullptr == s ) return;
+
+    BaseComponent*  comp    = static_cast<BaseComponent*>(s);
+    ObjectMapClass* obj_map = new ObjectMapClass(s, s->cls_name());
+    ser.report_object_map(obj_map);
+    ser.mapper().map_hierarchy_start(name, obj_map);
+
+    // Put in any subcomponents first
+    for ( auto it = comp->my_info->subComponents.begin(); it != comp->my_info->subComponents.end(); ++it ) {
+        std::string name_str = it->second.getShortName();
+        if ( name_str == "" ) {
+            // This is an anonymous subcomponent, create a name based
+            // on slotname and slotnum
+            name_str += it->second.getSlotName() + "[" + std::to_string(it->second.getSlotNum()) + "]";
+        }
+        // sst_map_object(ser, it->second.component, it->second.getShortName().c_str());
+        sst_map_object(ser, it->second.component, name_str.c_str());
+        it->second.serialize_comp(ser);
+    }
+
+    // Put in ComponentInfo data
+    ObjectMap* my_info_dir = new ObjectMapHierarchyOnly();
+    ser.mapper().map_hierarchy_start("my_info", my_info_dir);
+    ser.mapper().setNextObjectReadOnly();
+    sst_map_object(ser, const_cast<ComponentId_t&>(comp->my_info->id), "id");
+    ser.mapper().setNextObjectReadOnly();
+    sst_map_object(ser, const_cast<std::string&>(comp->my_info->type), "type");
+    sst_map_object(ser, comp->my_info->defaultTimeBase, "defaultTimeBase");
+    ser.mapper().map_hierarchy_end(); // for my_info_dir
+
+    s->serialize_order(ser);
+    ser.mapper().map_hierarchy_end(); // obj_map
+}
+
+} // namespace pvt
+} // namespace Serialization
+} // namespace Core
+
 
 } // namespace SST

@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -36,7 +36,7 @@ protected:
     void         generateComponent(const ConfigComponent* comp, bool output_parition_info);
     void         generateStatGroup(const ConfigGraph* graph, const ConfigStatGroup& grp);
 
-    const std::string& getLinkObject(LinkId_t id, bool no_cut);
+    const std::string& getLinkObject(LinkId_t id, const std::string& name, bool no_cut);
 
     char* makePythonSafeWithPrefix(const std::string& name, const std::string& prefix) const;
     void  makeBufferPythonSafe(char* buffer) const;

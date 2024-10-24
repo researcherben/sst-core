@@ -1,10 +1,10 @@
 // -*- c++ -*-
 
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -15,7 +15,8 @@
 #define SST_CORE_UNITALGEBRA_H
 
 #include "sst/core/decimal_fixedpoint.h"
-#include "sst/core/serialization/serializable.h"
+#include "sst/core/serialization/objectMap.h"
+#include "sst/core/serialization/serialize.h"
 #include "sst/core/serialization/serializer.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/warnmacros.h"
@@ -27,7 +28,6 @@
 
 namespace SST {
 
-// typedef decimal_fixedpoint<3,3> sst_dec_float;
 typedef decimal_fixedpoint<3, 3> sst_big_num;
 
 /**
@@ -70,8 +70,8 @@ public:
 
     // Non-static data members and functions
     /** Create a new instantiation of a Units with a base unit string, and multiplier
-     * \param units String representing the new unit
-     * \param multiplier Value by which to multiply to get to this unit
+     * @param units String representing the new unit
+     * @param multiplier Value by which to multiply to get to this unit
      */
     Units(const std::string& units, sst_big_num& multiplier);
     Units() {}
@@ -103,9 +103,7 @@ public:
  * Allows operations such as multiplying a frequency by 2.
  *
  */
-class UnitAlgebra :
-    public SST::Core::Serialization::serializable,
-    public SST::Core::Serialization::serializable_type<UnitAlgebra>
+class UnitAlgebra
 {
 private:
     Units       unit;
@@ -120,8 +118,8 @@ public:
     /**
      Create a new UnitAlgebra instance, and pre-populate with a parsed value.
 
-     \param val  Value to parse.  It is of the following format:
-     \code
+     @param val  Value to parse.  It is of the following format:
+     @code
      val        := NUMBER( )?UNITS
      NUMBER     := (-)?[0-9]+(.[0-9]+)?
      UNITS      := UNITGROUP(/UNITGROUP)
@@ -130,7 +128,7 @@ public:
      SIPREFIX   := {a,f,p,n,u,m,[kKMGTPE]i?}
      BASEUNIT   := {s,B,b,events}
      COMPUNIT   := {Hz,hz,Bps,bps,event}
-     \endcode
+     @endcode
      */
     UnitAlgebra(const std::string& val);
     virtual ~UnitAlgebra();
@@ -138,18 +136,26 @@ public:
     /** Copy constructor */
     UnitAlgebra(const UnitAlgebra&) = default;
 
-    /** Print to an ostream the value */
-    void        print(std::ostream& stream);
+    /** Print to an ostream the value
+     * @param stream Output stream
+     * @param precision Number of digits to print. Default is 6. <= 0 is full precision.
+     */
+    void        print(std::ostream& stream, int32_t precision = 6);
     /** Print to an ostream the value
      * Formats the number using SI-prefixes
+     * @param stream Output stream
+     * @param precision Number of digits to print. Default is 6. <= 0 is full precision.
      */
-    void        printWithBestSI(std::ostream& stream);
-    /** Return a string representation of this value */
-    std::string toString() const;
+    void        printWithBestSI(std::ostream& stream, int32_t precision = 6);
+    /** Return a string representation of this value
+     * @param precision Number of digits to print. Default is 6. <= 0 is full precision.
+     */
+    std::string toString(int32_t precision = 6) const;
     /** Return a string representation of this value
      * Formats the number using SI-prefixes
+     * @param precision Number of digits to print. Default is 6. <= 0 is full precision.
      */
-    std::string toStringBestSI() const;
+    std::string toStringBestSI(int32_t precision = 6) const;
 
     UnitAlgebra& operator=(const std::string& v);
 
@@ -214,12 +220,12 @@ public:
     bool        hasUnits(const std::string& u) const;
     /** Return the raw value */
     sst_big_num getValue() const { return value; }
-    /** Return the rounded value as a 64bit integer */
+    /** @return Rounded value as a 64bit integer */
     int64_t     getRoundedValue() const;
     double      getDoubleValue() const;
     bool        isValueZero() const;
 
-    void serialize_order(SST::Core::Serialization::serializer& ser) override
+    void serialize_order(SST::Core::Serialization::serializer& ser) /* override */
     {
         // Do the unit
         ser& unit.numerator;
@@ -243,9 +249,62 @@ public:
             value = sst_big_num(s);
             break;
         }
+        case SST::Core::Serialization::serializer::MAP:
+            // Add your code here
+            break;
         }
     }
-    ImplementSerializable(SST::UnitAlgebra)
+
+public:
+    /** Base exception for all exception classes in UnitAlgebra
+     *
+     * This exception inherits from std::logic_error, as all exceptions
+     * thrown in UnitAlgebra are considered configuration errors occurring
+     * prior to simulation start, rather than runtime errors.
+     */
+    class UnitAlgebraException : public std::logic_error
+    {
+    public:
+        /**
+         * @param msg exception message displayed as-is without modification
+         */
+        UnitAlgebraException(const std::string& msg);
+    };
+
+    /** Exception for when units are not recognized or are invalid
+     */
+    class InvalidUnitType : public UnitAlgebraException
+    {
+    public:
+        /**
+         * @param type string containing invalid type
+         */
+        InvalidUnitType(const std::string& type);
+    };
+
+    /** Exception for when number couldn't be parsed
+     */
+    class InvalidNumberString : public UnitAlgebraException
+    {
+    public:
+        /**
+         * @param number string containing invalid number
+         */
+        InvalidNumberString(const std::string& number);
+    };
+
+    /** Exception for when attempting operations between objects that do not have matching base units
+     */
+    class NonMatchingUnits : public UnitAlgebraException
+    {
+    public:
+        /**
+         * @param lhs units for UnitAlgebra on left-hand side of operation
+         * @param rhs units for UnitAlgebra on right-hand side of operation
+         * @param operation representation of operation attempted between units
+         */
+        NonMatchingUnits(const std::string& lhs, const std::string& rhs, const std::string& operation);
+    };
 };
 
 // template <typename T>
@@ -343,6 +402,81 @@ operator<<(std::ostream& os, const Units& r)
     os << r.toString();
     return os;
 }
+
+
+namespace Core {
+namespace Serialization {
+
+template <>
+class ObjectMapFundamental<UnitAlgebra> : public ObjectMap
+{
+protected:
+    /**
+       Address of the variable for reading and writing
+     */
+    UnitAlgebra* addr_ = nullptr;
+
+public:
+    std::string get() override { return addr_->toStringBestSI(); }
+    void        set_impl(const std::string& value) override { addr_->init(value); }
+
+    // We'll act like we're a fundamental type
+    bool isFundamental() override { return true; }
+
+    /**
+       Get the address of the variable represented by the ObjectMap
+
+       @return Address of varaible
+     */
+    void* getAddr() override { return addr_; }
+
+
+    /**
+       Get the list of child variables contained in this ObjectMap,
+       which in this case will be empty.
+
+       @return Refernce to vector containing ObjectMaps for this
+       ObjectMap's child variables. This vector will be empty because
+       fundamentals have no children
+     */
+    const std::vector<std::pair<std::string, ObjectMap*>>& getVariables() override { return emptyVars; }
+
+    ObjectMapFundamental(UnitAlgebra* addr) : ObjectMap(), addr_(addr) {}
+
+    std::string getType() override { return demangle_name(typeid(UnitAlgebra).name()); }
+};
+
+template <>
+class serialize_impl<UnitAlgebra>
+{
+    template <class A>
+    friend class serialize;
+
+    void operator()(UnitAlgebra& ua, serializer& ser)
+    {
+        switch ( ser.mode() ) {
+        case serializer::SIZER:
+        case serializer::PACK:
+        case serializer::UNPACK:
+            ua.serialize_order(ser);
+            break;
+        case serializer::MAP:
+            // Add your code here
+            break;
+        }
+    }
+
+    void operator()(UnitAlgebra& ua, serializer& ser, const char* name)
+    {
+        ObjectMap* obj_map = new ObjectMapFundamental<UnitAlgebra>(&ua);
+        ser.mapper().map_primitive(name, obj_map);
+    }
+};
+
+
+} // namespace Serialization
+} // namespace Core
+
 
 } // namespace SST
 

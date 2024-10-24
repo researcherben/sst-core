@@ -1,10 +1,10 @@
 // -*- c++ -*-
 
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -60,22 +60,21 @@ public:
     TimeConverter* getTimeConverter(const UnitAlgebra& ts);
 
     /**
-     * Return the Time Base of the TimeLord
+     * @return Time Base of the TimeLord
      */
     UnitAlgebra getTimeBase() const { return timeBase; }
 
-    /** Return a TimeConverter which represents Nanoseconds */
+    /** @return TimeConverter which represents Nanoseconds */
     TimeConverter* getNano() { return nano; }
-    /** Return a TimeConverter which represents Microseconds */
+    /** @return TimeConverter which represents Microseconds */
     TimeConverter* getMicro() { return micro; }
-    /** Return a TimeConverter which represents Milliseconds */
+    /** @return TimeConverter which represents Milliseconds */
     TimeConverter* getMilli() { return milli; }
 
     /** Not a Public API.
      * Returns the number of raw simulation cycles given by a specified time string
      */
     SimTime_t getSimCycles(const std::string& timeString, const std::string& where);
-
 
 private:
     friend class SST::Simulation;
@@ -99,7 +98,6 @@ private:
     bool                 initialized;
     std::recursive_mutex slock;
 
-    // Variables that need to be saved when serialized
     std::string        timeBaseString;
     TimeConverterMap_t tcMap;
     UnitAlgebra        timeBase;

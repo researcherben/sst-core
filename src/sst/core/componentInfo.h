@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -13,6 +13,7 @@
 #define SST_CORE_COMPONENTINFO_H
 
 #include "sst/core/params.h"
+#include "sst/core/serialization/serializer_fwd.h"
 #include "sst/core/sst_types.h"
 
 #include <functional>
@@ -32,9 +33,13 @@ class ConfigStatistic;
 class Simulation_impl;
 class TimeConverter;
 
-namespace Statistics {
-class StatisticInfo;
-}
+namespace Core {
+namespace Serialization {
+namespace pvt {
+class SerializeBaseComponentHelper;
+} // namespace pvt
+} // namespace Serialization
+} // namespace Core
 
 class ComponentInfo
 {
@@ -58,6 +63,7 @@ private:
     friend class Simulation_impl;
     friend class BaseComponent;
     friend class ComponentInfoMap;
+    friend class Core::Serialization::pvt::SerializeBaseComponentHelper;
 
     /**
        Component ID.
@@ -161,6 +167,17 @@ private:
         uint64_t share_flags);
 
 public:
+    /**
+       Constructor used only for serialization
+     */
+    ComponentInfo();
+
+    /**
+       Function used to serialize the class
+     */
+    void serialize_order(SST::Core::Serialization::serializer& ser);
+    void serialize_comp(SST::Core::Serialization::serializer& ser);
+
     /* Old ELI Style subcomponent constructor */
     ComponentInfo(const std::string& type, const Params* params, const ComponentInfo* parent_info);
 
@@ -195,6 +212,12 @@ public:
             real_comp = real_comp->parent_info;
         return real_comp->getName();
     }
+
+    /**
+       Get the short name for this SubComponent (name not including
+       any parents, so just slot_name[index])
+     */
+    inline std::string getShortName() const { return name.substr(name.find_last_of(':') + 1); }
 
     inline const std::string& getSlotName() const { return slot_name; }
 
@@ -244,6 +267,19 @@ public:
     {
         bool operator()(const ComponentInfo* lhs, const ComponentInfo* rhs) const { return lhs->id == rhs->id; }
     };
+
+    //// Functions used only for testing, they will not create valid
+    //// ComponentInfos for simulation
+
+    /**
+       (DO NOT USE) Constructor used only for serialization testing
+     */
+    ComponentInfo(ComponentId_t id, const std::string& name, const std::string& slot_name, TimeConverter* tv = nullptr);
+
+    ComponentInfo*
+    test_addSubComponentInfo(const std::string& name, const std::string& slot_name, TimeConverter* tv = nullptr);
+
+    void test_printComponentInfoHierarchy(int index = 0);
 };
 
 class ComponentInfoMap
@@ -284,6 +320,8 @@ public:
         }
         dataByID.clear();
     }
+
+    size_t size() { return dataByID.size(); }
 };
 
 } // namespace SST

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-# Copyright 2009-2023 NTESS. Under the terms
+# Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
 # Government retains certain rights in this software.
 #
-# Copyright (c) 2009-2023, NTESS
+# Copyright (c) 2009-2024, NTESS
 # All rights reserved.
 #
 # This file is part of the SST software package. For license
@@ -23,15 +23,15 @@ import traceback
 import shlex
 import ast
 import inspect
-
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
+import signal
+from subprocess import TimeoutExpired
+from typing import Any, Dict, List, Optional
 
 import test_engine_globals
 
 ################################################################################
 
-class OSCommand():
+class OSCommand:
     """ Enables to run subprocess commands in a different thread with a TIMEOUT option.
         This will return a OSCommandResult object.
 
@@ -67,22 +67,25 @@ class OSCommand():
         self._validate_cmd_str(cmd_str)
         self._output_file_path = self._validate_output_path(output_file_path)
         self._error_file_path = self._validate_output_path(error_file_path)
-
+        self._signal = signal.NSIG
+        self._signal_sec = 3
 ####
 
-    def run(self, timeout_sec=60, **kwargs):
+    def run(self, timeout_sec=60, send_signal=signal.NSIG, signal_sec=3, **kwargs):
         """ Run a command then return and OSCmdRtn object.
 
             Args:
                 timeout_sec (int): The maximum runtime in seconds before thread
                                    will be terminated and a timeout error will occur.
-                kwargs: Extra parameters
+                kwargs: Extra parameters e.g., timeout_sec to override the default timeout
         """
         if not (isinstance(timeout_sec, (int, float)) and not isinstance(timeout_sec, bool)):
             raise ValueError("ERROR: Timeout must be an int or a float")
 
         self._timeout_sec = timeout_sec
-
+        self._signal = send_signal
+        self._signal_sec = signal_sec
+        
         # Build the thread that will monitor the subprocess with a timeout
         thread = threading.Thread(target=self._run_cmd_in_subprocess, kwargs=kwargs)
         thread.start()
@@ -132,6 +135,13 @@ class OSCommand():
                                              shell=self._use_shell,
                                              cwd = subprocess_path,
                                              **kwargs)
+            
+            if self._signal is not signal.NSIG:
+                try:
+                    self._run_output, self._run_error = self._process.communicate(timeout=self._signal_sec)
+                except TimeoutExpired:
+                    self._process.send_signal(self._signal)
+           
             self._run_output, self._run_error = self._process.communicate()
             self._run_status = self._process.returncode
 
@@ -226,24 +236,18 @@ class OSCommandResult():
     def output(self):
         """ return the run output result """
         # Sometimes the output can be a unicode or a byte string - convert it
-        if PY3:
-            if type(self._run_output) is bytes:
-                self._run_output = self._run_output.decode(encoding='UTF-8')
-            return self._run_output
-        else:
-            return self._run_output.decode('utf-8')
+        if isinstance(self._run_output, bytes):
+            self._run_output = self._run_output.decode(encoding='UTF-8')
+        return self._run_output
 
 ####
 
     def error(self):
         """ return the run error output result """
         # Sometimes the output can be a unicode or a byte string - convert it
-        if PY3:
-            if type(self._run_error) is bytes:
-                self._run_error = self._run_error.decode(encoding='UTF-8')
-            return self._run_error
-        else:
-            return self._run_error.decode('utf-8')
+        if isinstance(self._run_error, bytes):
+            self._run_error = self._run_error.decode(encoding='UTF-8')
+        return self._run_error
 
 ####
 

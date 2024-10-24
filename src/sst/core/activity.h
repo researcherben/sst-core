@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -25,6 +25,7 @@
 #include <unordered_map>
 
 // Default Priority Settings
+#define INTERACTIVEPRIOIRTY    0
 #define THREADSYNCPRIORITY     20
 #define SYNCPRIORITY           25
 #define STOPACTIONPRIORITY     30
@@ -154,6 +155,9 @@ public:
 
     /** Returns the queue order associated with this activity */
     inline uint64_t getQueueOrder() const { return queue_order; }
+
+    virtual bool isEvent() { return false; }
+    virtual bool isAction() { return false; }
 
     /** Get a string represenation of the event.  The default version
      * will just use the name of the class, retrieved through the

@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -36,7 +36,11 @@ public:
         Creates an uniform distribution with a specific number of bins
         \param probsCount Number of probability bins in this distribution
     */
-    UniformDistribution(const uint32_t probsCount) : RandomDistribution(), probCount(probsCount), deleteDistrib(true)
+    UniformDistribution(const uint32_t probsCount) :
+        RandomDistribution(),
+        deleteDistrib(true),
+        probCount(probsCount),
+        probPerBin(1)
     {
 
         if ( probCount > 0 ) { probPerBin = 1.0 / static_cast<double>(probCount); }
@@ -52,8 +56,9 @@ public:
     */
     UniformDistribution(const uint32_t probsCount, SST::RNG::Random* baseDist) :
         RandomDistribution(),
+        deleteDistrib(false),
         probCount(probsCount),
-        deleteDistrib(false)
+        probPerBin(1)
     {
 
         if ( probCount > 0 ) { probPerBin = 1.0 / static_cast<double>(probCount); }
@@ -74,7 +79,7 @@ public:
         \return The next random double from the distribution, this is the double converted of the index where the
        probability is located
     */
-    double getNextDouble()
+    double getNextDouble() override
     {
         const double nextD       = baseDistrib->nextUniform();
         uint32_t     current_bin = 1;
@@ -85,6 +90,27 @@ public:
 
         return static_cast<double>(current_bin - 1);
     }
+
+    /**
+        Default constructor. FOR SERIALIZATION ONLY.
+     */
+    UniformDistribution() : RandomDistribution(), deleteDistrib(true), probCount(0) {}
+
+    /**
+        Serialization function for checkpoint
+    */
+    void serialize_order(SST::Core::Serialization::serializer& ser) override
+    {
+        ser& baseDistrib;
+        ser& const_cast<bool&>(deleteDistrib);
+        ser& const_cast<uint32_t&>(probCount);
+        ser& probPerBin;
+    }
+
+    /**
+        Serialization macro
+    */
+    ImplementSerializable(SST::RNG::UniformDistribution)
 
 protected:
     /**

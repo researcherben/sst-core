@@ -2,7 +2,7 @@
 AC_INIT([SSTCore], [-dev], [wg-sst@sandia.gov])
 
 AC_PREREQ([2.59])
-AC_COPYRIGHT([Copyright National Technology and Engineering Solutions of Sandia (NTESS), 2004-2023])
+AC_COPYRIGHT([Copyright National Technology and Engineering Solutions of Sandia (NTESS), 2004-2024])
 
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_MACRO_DIR([config])
@@ -40,6 +40,19 @@ CXXFLAGS="$CXXFLAGS -std=c++17"
 #        [CXXFLAGS="$CXXFLAGS $SST_CXX1Y_FLAGS"],
 #        [CXXFLAGS="$CXXFLAGS $SST_CXX0X_FLAGS"])
 
+# The combination of newer versions of Clang changing the default behavior
+# from `-ffp-contract=off` to `-ffp-contract=on` and running on ARM due to the
+# underlying FMA instruction lead to floating point
+# differences. (https://releases.llvm.org/14.0.0/tools/clang/docs/ReleaseNotes.html#floating-point-support-in-clang)
+AC_LANG_PUSH([C++])
+AX_COMPILER_VENDOR
+AC_LANG_POP([C++])
+case "$ax_cv_cxx_compiler_vendor" in
+    clang)
+        CXXFLAGS="$CXXFLAGS -ffp-contract=off"
+        ;;
+esac
+
 SST_CHECK_PICKY
 AS_IF([test "x$use_picky" = "xyes"],
       [WARNFLAGS="-Wall -Wextra"],
@@ -64,6 +77,7 @@ SST_CHECK_MPI([], [AC_MSG_ERROR([Could not find MPI package])])
 
 SST_CHECK_PYTHON([], [AC_MSG_ERROR([Could not find Python, this is required for SST to build])])
 SST_CHECK_LIBZ([have_zlib="yes"],[have_zlib="no"],[AC_MSG_ERROR([zlib was requested but could not be found.])])
+SST_CHECK_CURSES()
 SST_CHECK_BACKTRACE()
 SST_CHECK_HDF5()
 SST_CHECK_MEM_POOL()
@@ -139,8 +153,11 @@ AC_DEFINE_UNQUOTED([SST_INSTALL_PREFIX], ["$prefix"], [Defines the location SST 
 AC_CACHE_SAVE
 
 dnl Remove flags like -g, -O, and -W, that are not needed by other elements
-SST_EXPORT_CXXFLAGS=`echo "$CXXFLAGS" | sed -E -e 's/ *-(g|O@<:@^@<:@:space:@:>@@:>@*|W@<:@^@<:@:space:@:>@@:>@+)//g'`
-SST_EXPORT_CFLAGS=`echo "$CFLAGS" | sed -E -e 's/ *-(g|O@<:@^@<:@:space:@:>@@:>@*|W@<:@^@<:@:space:@:>@@:>@+)//g'`
+export_flag_cleanup() {
+  echo "$1" | sed -E -e 's/ *-(@<:@gO@:>@@<:@^@<:@:space:@:>@@:>@*|W@<:@^@<:@:space:@:>@@:>@+)//g'
+}
+SST_EXPORT_CXXFLAGS=`export_flag_cleanup "$CXXFLAGS"`
+SST_EXPORT_CFLAGS=`export_flag_cleanup "$CFLAGS"`
 AC_SUBST(SST_EXPORT_CXXFLAGS)
 AC_SUBST(SST_EXPORT_CFLAGS)
 
@@ -150,6 +167,7 @@ AC_CONFIG_FILES([
   doc/Doxyfile
   share/Makefile
   share/SSTConfig.cmake
+  share/SSTConfigVersion.cmake
   src/sst/sstsimulator.conf:src/sst/sst.conf
   src/Makefile
   src/sst/Makefile
@@ -222,11 +240,7 @@ echo "Configuration Information (Dependencies):"
 echo ""
 
 printf "%38s : %s (%s)\n" "Found Python" "$PYTHON_EXE" "$PYTHON_VERSION"
-if test "x$PYTHON_VERSION3" = "xyes" ; then
-    printf "%38s : Yes\n" "Python3"
-else
-    printf "%38s : No\n" "Python3"
-fi
+
 if test "x$sst_check_hdf5_happy" = "xyes" ; then
     printf "%38s : Yes\n" "HDF5 Support"
 else
@@ -238,9 +252,10 @@ else
     printf "%38s : No\n" "libz compression library"
 fi
 
-if test "x$PYTHON_VERSION3" = "xno"; then
-    printf "DEPRECATION NOTICE: Use of Python 2 is deprecated in favor of Python 3.5 or greater. Support for Python 2 may be removed in SST 12 or later.\n"
+if test "x$sst_check_curses_happy" = "xyes" ; then
+    printf "%38s : %s %s\n" "curses library" "$CURSES_LIBS"
+else
+    printf "%38s : Not found\n" "curses library"
 fi
 
 echo "-------------------------------------------------------"
-

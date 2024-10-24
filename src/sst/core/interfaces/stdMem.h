@@ -1,9 +1,9 @@
 // -*- mode: c++ -*-
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -104,6 +104,7 @@ public:
 
     /** All Addresses can be 64-bit */
     typedef uint64_t Addr;
+#define PRI_ADDR PRIx64
 
     /**
      * Base class for StandardMem commands
@@ -443,7 +444,7 @@ public:
         std::string getString() override
         {
             std::ostringstream str;
-            str << "ID:" << id << ", Type: WriteResp, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
+            str << "ID: " << id << ", Type: WriteResp, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
                 << pAddr;
             str << ", VirtAddr: 0x" << vAddr << ", Size: " << std::dec << size << ", InstPtr: 0x" << std::hex << iPtr;
             str << ", ThreadID: " << std::dec << tid;
@@ -491,7 +492,7 @@ public:
         std::string getString() override
         {
             std::ostringstream str;
-            str << "ID:" << id << ", Type: FlushAddr, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
+            str << "ID: " << id << ", Type: FlushAddr, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
                 << pAddr;
             str << ", VirtAddr: 0x" << vAddr << ", Size: " << std::dec << size << ", Inv: " << (inv ? "T" : "F");
             str << ", Depth: " << depth << ", InstPtr: 0x" << std::hex << iPtr << ", ThreadID: " << std::dec << tid;
@@ -545,7 +546,7 @@ public:
         std::string getString() override
         {
             std::ostringstream str;
-            str << "ID:" << id << ", Type: FlushResp, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
+            str << "ID: " << id << ", Type: FlushResp, Flags: [" << getFlagString() << "], PhysAddr: 0x" << std::hex
                 << pAddr;
             str << ", VirtAddr: 0x" << vAddr << ", Size: " << std::dec << size;
             str << ", InstPtr: 0x" << std::hex << iPtr << ", ThreadID: " << std::dec << tid;
@@ -913,6 +914,48 @@ public:
             return str.str();
         }
 
+        /**
+         * Get the CustomData object associated with this request.
+         * Ownership of the CustomData object is retained by this request.
+         */
+        CustomData& getData() { return *data; }
+
+        /**
+         * Get the CustomData object associated with this request.
+         * Ownership of the CustomData object is retained by this request.
+         * The returned data cannot be modified.
+         */
+        const CustomData& getData() const { return *data; }
+
+        /**
+         * Set the CustomData object associated with this request to a new
+         * value.
+         * This request takes ownership of the CustomData object.
+         * The previous CustomData object is deleted.
+         */
+        void setData(CustomData* d)
+        {
+            delete data;
+            data = d;
+        }
+
+        /**
+         * Reset the CustomData object associated with this request to a new
+         * value.
+         * The previous CustomData object is returned and ownership is
+         * transferred to the caller.
+         * This request assumes ownership of the passed in CustomData object.
+         * If no CustomData object is passed in, the data member is set to nullptr.
+         */
+        CustomData* resetData(CustomData* d = nullptr) { return std::exchange(data, d); }
+
+        /**
+         * Obtain the CustomData object associated with this request.
+         * Ownership of the CustomData object is transferred to the caller.
+         * The data member of this request is set to nullptr.
+         */
+        CustomData* releaseData() { return resetData(); }
+
         CustomData* data; /* Custom class that holds data for this event */
         Addr        iPtr; /* Instruction pointer */
         uint32_t    tid;  /* Thread ID */
@@ -929,7 +972,7 @@ public:
         {}
         CustomResp(CustomReq* req) :
             Request(req->getID(), req->getAllFlags()),
-            data(req->data->makeResponse()),
+            data(req->getData().makeResponse()),
             iPtr(req->iPtr),
             tid(req->tid)
         {}
@@ -950,6 +993,48 @@ public:
             str << ", InstPtr: 0x" << std::hex << iPtr << ", ThreadID: " << std::dec << tid;
             return str.str();
         }
+
+        /**
+         * Get the CustomData object associated with this response.
+         * Ownership of the CustomData object is retained by this response.
+         */
+        CustomData& getData() { return *data; }
+
+        /**
+         * Get the CustomData object associated with this response.
+         * Ownership of the CustomData object is retained by this response.
+         * The returned data cannot be modified.
+         */
+        const CustomData& getData() const { return *data; }
+
+        /**
+         * Set the CustomData object associated with this response to a new
+         * value.
+         * This response takes ownership of the CustomData object.
+         * The previous CustomData object is deleted.
+         */
+        void setData(CustomData* d)
+        {
+            delete data;
+            data = d;
+        }
+
+        /**
+         * Reset the CustomData object associated with this response to a new
+         * value.
+         * The previous CustomData object is returned and ownership is
+         * transferred to the caller.
+         * This response assumes ownership of the passed in CustomData object.
+         * If no CustomData object is passed in, the data member is set to nullptr.
+         */
+        CustomData* resetData(CustomData* d = nullptr) { return std::exchange(data, d); }
+
+        /**
+         * Obtain the CustomData object associated with this response.
+         * Ownership of the CustomData object is transferred to the caller.
+         * The data member of this response is set to nullptr.
+         */
+        CustomData* releaseData() { return resetData(); }
 
         CustomData* data; /* Custom class that holds data for this event */
         Addr        iPtr; /* Instruction pointer */
@@ -1060,6 +1145,9 @@ public:
         SubComponent(id)
     {}
 
+    /** Default constructor, used for serialization ONLY */
+    StandardMem() : SubComponent() {}
+
     /**
      * Sends a memory-based request during the init()/complete() phases
      * @param req Request to send
@@ -1119,6 +1207,11 @@ public:
      * @param size Size, in bytes, of the region mapped to this endpoint
      */
     virtual void setMemoryMappedAddressRegion(Addr start, Addr size) = 0;
+
+    /**
+     * Serialization function
+     */
+    virtual void serialize_order(SST::Core::Serialization::serializer& ser) { SST::SubComponent::serialize_order(ser); }
 };
 
 } // namespace Interfaces

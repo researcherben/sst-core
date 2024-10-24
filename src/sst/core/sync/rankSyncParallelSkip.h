@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -27,14 +27,15 @@ REENABLE_WARNING
 
 namespace SST {
 
-class SyncQueue;
+class RankSyncQueue;
 class TimeConverter;
 
 class RankSyncParallelSkip : public RankSync
 {
 public:
     /** Create a new Sync object which fires with a specified period */
-    RankSyncParallelSkip(RankInfo num_ranks, TimeConverter* minPartTC);
+    RankSyncParallelSkip(RankInfo num_ranks);
+    RankSyncParallelSkip() {} // For serialization
     virtual ~RankSyncParallelSkip();
 
     /** Register a Link which this Sync Object is responsible for */
@@ -49,7 +50,14 @@ public:
     /** Prepare for complete() stage */
     void prepareForComplete() override;
 
+    /** Set signals to exchange during sync */
+    void setSignals(int end, int usr, int alrm) override;
+    /** Return exchanged signals after sync */
+    bool getSignals(int& end, int& usr, int& alrm) override;
+
     SimTime_t getNextSyncTime() override { return myNextSyncTime; }
+
+    void setRestartTime(SimTime_t time) override;
 
     uint64_t getDataSize() const override;
 
@@ -60,15 +68,24 @@ private:
     void exchange_master(int thread);
     void exchange_slave(int thread);
 
-    struct comm_send_pair
+    struct comm_send_pair : public SST::Core::Serialization::serializable
     {
-        RankInfo   to_rank;
-        SyncQueue* squeue; // SyncQueue
-        char*      sbuf;
-        uint32_t   remote_size;
+        RankInfo       to_rank;
+        RankSyncQueue* squeue; // RankSyncQueue
+        char*          sbuf;
+        uint32_t       remote_size;
+
+        void serialize_order(SST::Core::Serialization::serializer& ser) override
+        {
+            ser& to_rank;
+            // squeue - empty so recreate on restart
+            // sbuf - empty so recreate on restart
+            // remote_size - don't need
+        }
+        ImplementSerializable(comm_send_pair)
     };
 
-    struct comm_recv_pair
+    struct comm_recv_pair : public SST::Core::Serialization::serializable
     {
         uint32_t               remote_rank;
         uint32_t               local_thread;
@@ -79,6 +96,16 @@ private:
 #ifdef SST_CONFIG_HAVE_MPI
         MPI_Request req;
 #endif
+        void serialize_order(SST::Core::Serialization::serializer& ser) override
+        {
+            ser& remote_rank;
+            ser& local_thread;
+            // activity_vec - empty so recreate on restart
+            // rbuf - empty so recreate on restart
+            // recv_done - don't need
+            // req - don't need
+        }
+        ImplementSerializable(comm_recv_pair)
     };
 
     typedef std::map<RankInfo, comm_send_pair> comm_send_map_t;
@@ -110,6 +137,9 @@ private:
     Core::ThreadSafe::Barrier allDoneBarrier;
 
     Core::ThreadSafe::Spinlock lock;
+    static int                 sig_end_;
+    static int                 sig_usr_;
+    static int                 sig_alrm_;
 };
 
 } // namespace SST

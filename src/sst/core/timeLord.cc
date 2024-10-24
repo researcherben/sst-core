@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -15,6 +15,8 @@
 
 #include "sst/core/linkMap.h"
 #include "sst/core/output.h"
+#include "sst/core/serialization/serialize.h"
+#include "sst/core/serialization/serializer.h"
 #include "sst/core/simulation_impl.h"
 #include "sst/core/timeConverter.h"
 #include "sst/core/warnmacros.h"
@@ -179,5 +181,98 @@ TimeConverter::getPeriod() const
 {
     return Simulation_impl::getTimeLord()->getTimeBase() * factor;
 }
+
+namespace Core {
+namespace Serialization {
+
+template <>
+class ObjectMapFundamental<TimeConverter*> : public ObjectMap
+{
+protected:
+    /**
+       Address of the variable for reading and writing
+     */
+    TimeConverter** addr_ = nullptr;
+
+public:
+    // We'll treat this as a period when printing
+    std::string get() override
+    {
+        if ( nullptr == *addr_ ) return "nullptr";
+        TimeLord*   timelord = Simulation_impl::getTimeLord();
+        UnitAlgebra base     = timelord->getTimeBase();
+        base *= (*addr_)->getFactor();
+        return base.toStringBestSI();
+    }
+
+    void set_impl(const std::string& UNUSED(value)) override { return; }
+
+    // We'll act like we're a fundamental type
+    bool isFundamental() override { return true; }
+
+    /**
+       Get the address of the variable represented by the ObjectMap
+
+       @return Address of varaible
+     */
+    void* getAddr() override { return addr_; }
+
+
+    /**
+       Get the list of child variables contained in this ObjectMap,
+       which in this case will be empty.
+
+       @return Refernce to vector containing ObjectMaps for this
+       ObjectMap's child variables. This vector will be empty because
+       fundamentals have no children
+     */
+    const std::vector<std::pair<std::string, ObjectMap*>>& getVariables() override { return emptyVars; }
+
+    ObjectMapFundamental(TimeConverter** addr) : ObjectMap(), addr_(addr) {}
+
+    std::string getType() override { return demangle_name(typeid(TimeConverter).name()); }
+};
+
+
+void
+serialize_impl<TimeConverter*>::operator()(
+    TimeConverter*& s, SST::Core::Serialization::serializer& ser, const char* name)
+{
+    SimTime_t factor = 0;
+
+    switch ( ser.mode() ) {
+    case serializer::SIZER:
+    case serializer::PACK:
+        // If s is nullptr, just put in a 0, otherwise get the factor
+        if ( nullptr != s ) factor = s->getFactor();
+        ser& factor;
+        break;
+    case serializer::UNPACK:
+    {
+        ser& factor;
+
+        // If we put in a nullptr, return a nullptr
+        if ( factor == 0 ) {
+            s = nullptr;
+            return;
+        }
+        // Now get the TimeConverter for this factor.  Can only use
+        // public APIs since there is no friend relationship with the
+        // TimeLord.
+        TimeLord*   timelord = Simulation_impl::getTimeLord();
+        UnitAlgebra base     = timelord->getTimeBase();
+        base *= factor;
+        s = timelord->getTimeConverter(base);
+        break;
+    }
+    case serializer::MAP:
+        ObjectMap* obj_map = new ObjectMapFundamental<TimeConverter*>(&s);
+        ser.mapper().map_primitive(name, obj_map);
+        break;
+    }
+}
+
+} // namespace Serialization
+} // namespace Core
 
 } // namespace SST

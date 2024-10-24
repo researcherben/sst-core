@@ -1,15 +1,17 @@
+# ~~~
 # SST-CORE src/sst/core CMake
 #
-# Copyright 2009-2023 NTESS. Under the terms
+# Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
 # Government retains certain rights in this software.
 #
-# Copyright (c) 2009-2023, NTESS
+# Copyright (c) 2009-2024, NTESS
 # All rights reserved.
 #
 # This file is part of the SST software package. For license
 # information, see the LICENSE file in the top level directory of the
 # distribution.
+# ~~~
 #
 
 add_definitions(-DSST_BUILDING_CORE=1)
@@ -39,6 +41,7 @@ add_library(
   action.cc
   clock.cc
   baseComponent.cc
+  checkpointAction.cc
   component.cc
   componentExtension.cc
   componentInfo.cc
@@ -73,14 +76,12 @@ add_library(
   module.cc
   sstpart.cc
   timeVortex.cc
-
   profile/clockHandlerProfileTool.cc
   profile/componentProfileTool.cc
   profile/eventHandlerProfileTool.cc
   profile/syncProfileTool.cc
   profile/profiletool.cc
-
-  serialization/serializable.cc
+  serialization/serializable_base.cc
   serialization/serialize_serializable.cc
   serialization/serializer.cc
   serialization/statics.cc
@@ -241,6 +242,13 @@ endif()
 if(Threads_FOUND)
   target_link_libraries(sstinfo.x PRIVATE Threads::Threads)
   target_link_libraries(sstsim.x PRIVATE Threads::Threads)
+endif()
+
+if(CURSES_FOUND)
+  target_link_libraries(sstinfo.x PRIVATE ${CURSES_LIBRARIES})
+  # Before means no chance of interfering with a system curses if a
+  # user-provided one was specified.
+  target_include_directories(sstinfo.x BEFORE PRIVATE ${CURSES_INCLUDE_DIRS})
 endif()
 
 add_executable(sst bootsst.cc)

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-# Copyright 2009-2023 NTESS. Under the terms
+# Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
 # Government retains certain rights in this software.
 #
-# Copyright (c) 2009-2023, NTESS
+# Copyright (c) 2009-2024, NTESS
 # All rights reserved.
 #
 # This file is part of the SST software package. For license
@@ -14,6 +14,11 @@
 """ This module is a group of global variables that must be common to all tests
 """
 import os
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import configparser
 
 # Verbose Defines
 VERBOSE_QUIET = 0
@@ -49,7 +54,7 @@ TESTENGINE_TESTNOTESLIST = None
 
 # These are some globals to pass data between the top level test engine
 # and the lower level testscripts
-def init_test_engine_globals():
+def init_test_engine_globals() -> None:
     """ Initialize the test global variables """
     global TESTRUN_TESTRUNNINGFLAG
     global TESTRUN_SINGTHREAD_TESTSUITE_NAME

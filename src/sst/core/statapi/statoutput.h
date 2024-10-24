@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -15,6 +15,7 @@
 #include "sst/core/eli/elementinfo.h"
 #include "sst/core/module.h"
 #include "sst/core/params.h"
+#include "sst/core/serialization/serializable.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/statapi/statbase.h"
 #include "sst/core/statapi/statfieldinfo.h"
@@ -46,7 +47,7 @@ class StatisticGroup;
   the end of the simulation.  A single statistic output will be created by the
   simulation (per node) and will collect the data per its design.
 */
-class StatisticOutput
+class StatisticOutput : public SST::Core::Serialization::serializable
 {
 public:
     SST_ELI_DECLARE_BASE(StatisticOutput)
@@ -74,11 +75,15 @@ public:
 
     virtual bool supportsDynamicRegistration() const { return false; }
 
-    /////////////////
-    // Methods for Registering Fields (Called by Statistic Objects)
-public:
-    // by default, no params to return
-    static const std::vector<SST::ElementInfoParam>& ELI_getParams()
+    void serialize_order(SST::Core::Serialization::serializer& ser) override;
+
+    ImplementVirtualSerializable(SST::Statistics::StatisticOutput)
+
+        /////////////////
+        // Methods for Registering Fields (Called by Statistic Objects)
+        public :
+        // by default, no params to return
+        static const std::vector<SST::ElementInfoParam>& ELI_getParams()
     {
         static std::vector<SST::ElementInfoParam> var {};
         return var;
@@ -106,6 +111,21 @@ protected:
     /** Indicate to Statistic Output that simulation has ended.
      * Allows object to perform any shutdown required. */
     virtual void endOfSimulation() = 0;
+
+    /** Gets the Output object for the Simulation object associeted
+     * with this StatOutput. */
+    Output& getSimulationOutput();
+
+    /**
+       Gets the number of ranks for the simulation */
+    RankInfo getNumRanks();
+
+    /** Gets the Rank (MPI rank and thread) that this StatisticOutput
+       is associated with. */
+    RankInfo getRank();
+
+    /** Gets the current simulstion cycle */
+    SimTime_t getCurrentSimCycle();
 
 private:
     // Start / Stop of register Fields
@@ -252,14 +272,17 @@ public:
      */
     const char* getFieldTypeShortName(fieldType_t type);
 
-protected:
-    /** Construct a base StatisticOutput
-     * @param outputParameters - The parameters for the statistic Output.
-     */
-    StatisticFieldsOutput(Params& outputParameters);
+    void serialize_order(SST::Core::Serialization::serializer& ser) override;
+    ImplementVirtualSerializable(SST::Statistics::StatisticFieldsOutput)
+
+        protected :
+        /** Construct a base StatisticOutput
+         * @param outputParameters - The parameters for the statistic Output.
+         */
+        StatisticFieldsOutput(Params& outputParameters);
 
     // For Serialization
-    StatisticFieldsOutput() {}
+    StatisticFieldsOutput() : m_highestFieldHandle(0), m_currentFieldStatName("") {}
 
 private:
     // Other support functions

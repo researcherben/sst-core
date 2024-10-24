@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -82,6 +82,25 @@ public:
     }
 
     ~HistogramStatistic() {}
+
+    HistogramStatistic() : Statistic<BinDataType>() {} // For serialization ONLY
+
+    void serialize_order(SST::Core::Serialization::serializer& ser) override
+    {
+        SST::Statistics::Statistic<BinDataType>::serialize_order(ser);
+        ser& m_minValue;
+        ser& m_binWidth;
+        ser& m_numBins;
+        ser& m_OOBMinCount;
+        ser& m_OOBMaxCount;
+        ser& m_itemsBinnedCount;
+        ser& m_totalSummed;
+        ser& m_totalSummedSqr;
+        ser& m_binsMap;
+        ser& m_dumpBinsOnOutput;
+        ser& m_includeOutOfBounds;
+        // ser& m_Fields; // Rebuilt by stat output object
+    }
 
 protected:
     /**
@@ -260,7 +279,7 @@ private:
 
     void outputStatisticFields(StatisticFieldsOutput* statOutput, bool UNUSED(EndOfSimFlag)) override
     {
-        uint32_t x = 0;
+        StatisticOutput::fieldHandle_t x = 0;
         statOutput->outputField(m_Fields[x++], getBinsMinValue());
         statOutput->outputField(m_Fields[x++], getBinsMaxValue());
         statOutput->outputField(m_Fields[x++], getBinWidth());
@@ -336,9 +355,9 @@ private:
     HistoMap_t m_binsMap;
 
     // Support
-    std::vector<uint32_t> m_Fields;
-    bool                  m_dumpBinsOnOutput;
-    bool                  m_includeOutOfBounds;
+    std::vector<StatisticOutput::fieldHandle_t> m_Fields;
+    bool                                        m_dumpBinsOnOutput;
+    bool                                        m_includeOutOfBounds;
 };
 
 } // namespace Statistics

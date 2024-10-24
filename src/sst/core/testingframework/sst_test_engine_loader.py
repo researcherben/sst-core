@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-# Copyright 2009-2023 NTESS. Under the terms
+# Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
 # Government retains certain rights in this software.
 #
-# Copyright (c) 2009-2023, NTESS
+# Copyright (c) 2009-2024, NTESS
 # All rights reserved.
 #
 # This file is part of the SST software package. For license
@@ -33,52 +33,9 @@ TESTFRAMEWORKSFILES = ["sst_unittest.py", "sst_unittest_support.py",
 TEST_ELEMENTS = 0
 TEST_SST_CORE = 1
 
-REQUIRED_PY_MAJ_VER_2 = 2               # Required Python2 Major Version
-REQUIRED_PY_MAJ_VER_2_MINOR_VER = 7     # Required PY2 Minor Version
-REQUIRED_PY_MAJ_VER_2_SUB_MINOR_VER = 5 # Required PY2 Sub-Minor Version
-REQUIRED_PY_MAJ_VER_3 = 3               # Required Python 3 Major Version
-REQUIRED_PY_MAJ_VER_3_MINOR_VER = 4     # Required PY3 Minor Version
-REQUIRED_PY_MAJ_VER_3_SUB_MINOR_VER = 0 # Required PY3 Sub-Minor Version
-REQUIRED_PY_MAJ_VER_MAX = REQUIRED_PY_MAJ_VER_3 # Highest supported Major Version
-
 ################################################################################
 
-def check_python_version():
-    # Validate Python Versions
-    ver = sys.version_info
-
-    # Check for Py2.x or Py3.x Versions
-    if (ver[0] < REQUIRED_PY_MAJ_VER_2) or (ver[0] > REQUIRED_PY_MAJ_VER_3):
-        print(("SST Test Engine requires Python major version {0} or {1}\n" +
-               "Found Python version is:\n{2}").format(REQUIRED_PY_MAJ_VER_2,
-                                                       REQUIRED_PY_MAJ_VER_MAX,
-                                                       sys.version))
-        sys.exit(1)
-
-    # Check to ensure minimum Py2 version
-    if ((ver[0] == REQUIRED_PY_MAJ_VER_2) and (ver[1] < REQUIRED_PY_MAJ_VER_2_MINOR_VER)) or \
-       ((ver[0] == REQUIRED_PY_MAJ_VER_2) and (ver[1] == REQUIRED_PY_MAJ_VER_2_MINOR_VER)  and
-                                              (ver[2] < REQUIRED_PY_MAJ_VER_2_SUB_MINOR_VER)):
-        print(("SST Test Engine requires Python 2 version {0}.{1}.{2} or greater\n" +
-               "Found Python version is:\n{3}").format(REQUIRED_PY_MAJ_VER_2,
-                                                       REQUIRED_PY_MAJ_VER_2_MINOR_VER,
-                                                       REQUIRED_PY_MAJ_VER_2_SUB_MINOR_VER,
-                                                       sys.version))
-        sys.exit(1)
-
-    # Check to ensure minimum Py3 version
-    if ((ver[0] == REQUIRED_PY_MAJ_VER_3) and (ver[1] < REQUIRED_PY_MAJ_VER_3_MINOR_VER)) or \
-       ((ver[0] == REQUIRED_PY_MAJ_VER_3) and (ver[1] == REQUIRED_PY_MAJ_VER_3_MINOR_VER)  and
-                                              (ver[2] < REQUIRED_PY_MAJ_VER_3_SUB_MINOR_VER)):
-        print(("SST Test Engine requires Python 3 version {0}.{1}.{2} or greater\n" +
-               "Found Python version is:\n{3}").format(REQUIRED_PY_MAJ_VER_3,
-                                                       REQUIRED_PY_MAJ_VER_3_MINOR_VER,
-                                                       REQUIRED_PY_MAJ_VER_3_SUB_MINOR_VER,
-                                                       sys.version))
-        sys.exit(1)
-####
-
-def startup_and_run(sst_core_bin_dir, test_mode):
+def startup_and_run(sst_core_bin_dir: str, test_mode: int) -> None:
     """ This is the main entry point for loading and running the SST Test Frameworks
         Engine.
 
@@ -97,9 +54,6 @@ def startup_and_run(sst_core_bin_dir, test_mode):
             test_mode: 1 for Core Testing, 0 for Elements testing.
     """
     try:
-        # Check the python version and make sure we can run
-        check_python_version()
-
         if test_mode not in (TEST_SST_CORE, TEST_ELEMENTS):
             print((("FATAL: Unsupported test_mode {0} in ") +
                    ("startup_and_run()")).format(test_mode))
@@ -184,7 +138,7 @@ def _generic_exception_handler(exc_e):
 
 ####
 
-def _verify_test_frameworks_is_available(sst_core_frameworks_dir):
+def _verify_test_frameworks_is_available(sst_core_frameworks_dir: str) -> None:
     """ Ensure that all test framework files are available.
         :param: sst_core_frameworks_dir = Dir of the test frameworks
     """

@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -14,7 +14,6 @@
 #include "sst/core/statapi/statoutputhdf5.h"
 
 #include "sst/core/baseComponent.h"
-#include "sst/core/simulation_impl.h"
 #include "sst/core/statapi/statgroup.h"
 #include "sst/core/stringize.h"
 #include "sst/core/warnmacros.h"
@@ -30,10 +29,12 @@ StatisticOutputHDF5::StatisticOutputHDF5(Params& outputParameters) :
     m_currentDataSet(nullptr)
 {
     // Announce this output object's name
-    Output& out = Simulation_impl::getSimulationOutput();
+    Output& out = getSimulationOutput();
     out.verbose(CALL_INFO, 1, 0, " : StatisticOutputHDF5 enabled...\n");
     setStatisticOutputName("StatisticOutputHDF5");
 }
+
+StatisticOutputHDF5::StatisticOutputHDF5() : StatisticFieldsOutput(), m_hFile(nullptr), m_currentDataSet(nullptr) {}
 
 bool
 StatisticOutputHDF5::checkOutputParameters()
@@ -133,7 +134,7 @@ void
 StatisticOutputHDF5::implStartOutputEntries(StatisticBase* statistic)
 {
     if ( m_currentDataSet == nullptr ) m_currentDataSet = getStatisticInfo(statistic);
-    m_currentDataSet->startNewEntry(statistic);
+    m_currentDataSet->startNewEntry(statistic, getCurrentSimCycle());
 }
 
 void
@@ -148,7 +149,7 @@ StatisticOutputHDF5::startOutputGroup(StatisticGroup* group)
 {
     StatisticFieldsOutput::startOutputGroup(group);
     m_currentDataSet = &m_statGroups.at(group->name);
-    m_currentDataSet->startNewGroupEntry();
+    m_currentDataSet->startNewGroupEntry(getCurrentSimCycle());
 }
 
 void
@@ -210,12 +211,12 @@ StatisticOutputHDF5::getStatisticInfo(StatisticBase* statistic)
 }
 
 void
-StatisticOutputHDF5::StatisticInfo::startNewEntry(StatisticBase* UNUSED(stat))
+StatisticOutputHDF5::StatisticInfo::startNewEntry(StatisticBase* UNUSED(stat), Cycle_t cycle)
 {
     for ( StatData_u& i : currentData ) {
         memset(&i, '\0', sizeof(i));
     }
-    currentData[0].u64 = Simulation_impl::getSimulation()->getCurrentSimCycle();
+    currentData[0].u64 = cycle;
 }
 
 StatisticOutputHDF5::StatData_u&
@@ -479,7 +480,7 @@ StatisticOutputHDF5::GroupInfo::finalizeGroupRegistration()
 }
 
 void
-StatisticOutputHDF5::GroupInfo::startNewGroupEntry()
+StatisticOutputHDF5::GroupInfo::startNewGroupEntry(Cycle_t cycle)
 {
     /* Record current timestamp */
     for ( auto& gs : m_statGroups ) {
@@ -495,12 +496,12 @@ StatisticOutputHDF5::GroupInfo::startNewGroupEntry()
     H5::DataSpace fspace = timeDataSet->getSpace();
     H5::DataSpace memSpace(1, dims);
     fspace.selectHyperslab(H5S_SELECT_SET, dims, offset);
-    uint64_t currTime = Simulation_impl::getSimulation()->getCurrentSimCycle();
+    uint64_t currTime = cycle;
     timeDataSet->write(&currTime, H5::PredType::NATIVE_UINT64, memSpace, fspace);
 }
 
 void
-StatisticOutputHDF5::GroupInfo::startNewEntry(StatisticBase* stat)
+StatisticOutputHDF5::GroupInfo::startNewEntry(StatisticBase* stat, Cycle_t UNUSED(cycle))
 {
     m_currentStat = &(m_statGroups.at(GroupStat::getStatName(stat)));
     size_t compIndex =
@@ -621,6 +622,22 @@ StatisticOutputHDF5::GroupInfo::GroupStat::finishGroupEntry()
     fspace.selectHyperslab(H5S_SELECT_SET, dims, offset);
     dataset->write(currentData.data(), *memType, memSpace, fspace);
 }
+
+void
+StatisticOutputHDF5::serialize_order(SST::Core::Serialization::serializer& ser)
+{
+    StatisticFieldsOutput::serialize_order(ser);
+
+    if ( ser.mode() == SST::Core::Serialization::serializer::UNPACK ) {
+        // Get the parameters
+        std::string m_filePath = getOutputParameters().find<std::string>("filepath", "./StatisticOutput.h5");
+
+        H5::Exception::dontPrint();
+
+        m_hFile = new H5::H5File(m_filePath, H5F_ACC_TRUNC);
+    }
+}
+
 
 } // namespace Statistics
 } // namespace SST

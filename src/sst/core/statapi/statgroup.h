@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -12,6 +12,7 @@
 #ifndef SST_CORE_STATAPI_STATGROUP_H
 #define SST_CORE_STATAPI_STATGROUP_H
 
+#include "sst/core/serialization/serializer.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/unitAlgebra.h"
 
@@ -39,10 +40,14 @@ public:
     std::string      name;
     StatisticOutput* output;
     UnitAlgebra      outputFreq;
+    size_t           outputId;
 
     std::vector<ComponentId_t>  components;
     std::vector<std::string>    statNames;
     std::vector<StatisticBase*> stats;
+
+    void restartGroup(StatisticProcessingEngine* engine);
+    void serialize_order(SST::Core::Serialization::serializer& ser);
 };
 
 } // namespace Statistics

@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -13,9 +13,10 @@
 #define SST_CORE_STATAPI_STATBASE_H
 
 #include "sst/core/eli/elementinfo.h"
+#include "sst/core/factory.h"
 #include "sst/core/oneshot.h"
 #include "sst/core/params.h"
-#include "sst/core/serialization/serializable.h"
+#include "sst/core/serialization/serialize_impl_fwd.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/statapi/statfieldinfo.h"
 #include "sst/core/warnmacros.h"
@@ -31,25 +32,6 @@ class StatisticOutput;
 class StatisticFieldsOutput;
 class StatisticProcessingEngine;
 class StatisticGroup;
-
-class StatisticInfo : public SST::Core::Serialization::serializable
-{
-public:
-    std::string name;
-    Params      params;
-
-    StatisticInfo(const std::string& name) : name(name) {}
-    StatisticInfo(const std::string& name, const Params& params) : name(name), params(params) {}
-    StatisticInfo() {} /* DO NOT USE:  For serialization */
-
-    void serialize_order(SST::Core::Serialization::serializer& ser) override
-    {
-        ser& name;
-        ser& params;
-    }
-
-    ImplementSerializable(SST::Statistics::StatisticInfo)
-};
 
 /**
     \class StatisticBase
@@ -184,6 +166,15 @@ public:
     /** Indicate if the Statistic is a NullStatistic */
     virtual bool isNullStatistic() const { return false; }
 
+    /** Return the Statistic Parameters
+     * NOTE: This must be public so that it is accessible to the serialize_impl
+     * class for statistics.
+     */
+    Params& getParams() { return m_statParams; }
+
+    /** Serialization */
+    virtual void serialize_order(SST::Core::Serialization::serializer& ser);
+
 protected:
     friend class SST::Statistics::StatisticProcessingEngine;
     friend class SST::Statistics::StatisticOutput;
@@ -203,9 +194,7 @@ protected:
     // Destructor
     virtual ~StatisticBase() {}
 
-    /** Return the Statistic Parameters */
-    Params& getParams() { return m_statParams; }
-
+protected:
     /** Set the Statistic Data Type */
     void setStatisticDataType(const StatisticFieldInfo::fieldType_t dataType) { m_statDataType = dataType; }
 
@@ -287,10 +276,9 @@ private:
     bool                  m_collectionDelayed;
     bool                  m_savedStatEnabled;
     bool                  m_savedOutputEnabled;
-    OneShot::HandlerBase* m_outputDelayedHandler;
-    OneShot::HandlerBase* m_collectionDelayedHandler;
     const StatisticGroup* m_group;
 };
+
 
 /**
  \class StatisticCollector
@@ -368,6 +356,8 @@ public:
 
     using Datum = T;
     using StatisticCollector<T>::addData_impl;
+    using StatisticCollector<T>::addData_impl_Ntimes;
+
     // The main method to add data to the statistic
     /** Add data to the Statistic
      * This will call the addData_impl() routine in the derived Statistic.
@@ -395,6 +385,11 @@ public:
     }
 
     static fieldType_t fieldId() { return StatisticFieldType<T>::id(); }
+
+    virtual void serialize_order(SST::Core::Serialization::serializer& ser) override
+    {
+        StatisticBase::serialize_order(ser);
+    }
 
 protected:
     friend class SST::Factory;
@@ -487,6 +482,7 @@ private:
     const char*             short_name_;
     Statistics::fieldType_t field_;
 };
+
 
 #define SST_ELI_DECLARE_STATISTIC_TEMPLATE(cls, lib, name, version, desc, interface) \
     SST_ELI_DEFAULT_INFO(lib, name, ELI_FORWARD_AS_ONE(version), desc)               \
@@ -593,6 +589,75 @@ private:
     MAKE_MULTI_STATISTIC(cls, STAT_GLUE_NAME(cls, __VA_ARGS__), STAT_TUPLE(__VA_ARGS__), __VA_ARGS__)
 
 } // namespace Statistics
+
+namespace Stat {
+namespace pvt {
+
+/** Helper function for re-registering statistics during simulation restart */
+void registerStatWithEngineOnRestart(SST::Statistics::StatisticBase* s);
+
+} // namespace pvt
+} // namespace Stat
+
+namespace Core {
+namespace Serialization {
+
+template <class T>
+class serialize_impl<Statistics::Statistic<T>*>
+{
+    template <class A>
+    friend class serialize;
+    void operator()(Statistics::Statistic<T>*& s, serializer& ser, const char* UNUSED(name) = nullptr)
+    {
+        // For sizer and pack, need to get the information needed
+        // to create a new statistic of the correct type on unpack.
+        switch ( ser.mode() ) {
+        case serializer::SIZER:
+        case serializer::PACK:
+        {
+            Params      params   = s->getParams();
+            std::string stattype = s->getStatTypeName();
+            if ( stattype == "NULL" )
+                stattype = "sst.NullStatistic";
+            else
+                stattype = params.find<std::string>("type", "sst.AccumulatorStatistic");
+            BaseComponent* comp = s->getComponent();
+            ser&           stattype;
+            ser&           comp;
+            ser&           params;
+            s->serialize_order(ser);
+            break;
+        }
+        case serializer::UNPACK:
+        {
+            Params         params;
+            std::string    stattype;
+            BaseComponent* comp;
+            ser&           stattype;
+            ser&           comp;
+            ser&           params;
+            s = Factory::getFactory()->CreateWithParams<Statistics::Statistic<T>>(
+                stattype, params, comp, "", "", params);
+            s->serialize_order(ser);
+            if ( stattype != "sst.NullStatistic" ) { SST::Stat::pvt::registerStatWithEngineOnRestart(s); }
+            break;
+        }
+        case serializer::MAP:
+            // Mapping mode not supported for stats
+            break;
+        }
+    }
+
+    // void operator()(Statistics::Statistic<T>*& UNUSED(s), serializer& UNUSED(ser), const char* UNUSED(name))
+    // {
+    //     // Mapping mode not supported for stats
+    // }
+};
+
+} // namespace Serialization
+} // namespace Core
+
+
 } // namespace SST
 
 // we need to make sure null stats are instantiated for whatever types we use

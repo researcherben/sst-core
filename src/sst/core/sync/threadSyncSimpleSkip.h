@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -15,7 +15,7 @@
 #include "sst/core/action.h"
 #include "sst/core/sst_types.h"
 #include "sst/core/sync/syncManager.h"
-#include "sst/core/sync/threadSyncQueue.h"
+#include "sst/core/sync/syncQueue.h"
 #include "sst/core/threadsafe.h"
 
 #include <unordered_map>
@@ -35,6 +35,7 @@ class ThreadSyncSimpleSkip : public ThreadSync
 public:
     /** Create a new ThreadSync object */
     ThreadSyncSimpleSkip(int num_threads, int thread, Simulation_impl* sim);
+    ThreadSyncSimpleSkip() {} // For serialization only
     ~ThreadSyncSimpleSkip();
 
     void setMaxPeriod(TimeConverter* period);
@@ -42,6 +43,11 @@ public:
     void before() override;
     void after() override;
     void execute(void) override;
+
+    /** Set signals to exchange during sync */
+    void setSignals(int end, int usr, int alrm) override;
+    /** Return exchanged signals after sync */
+    bool getSignals(int& end, int& usr, int& alrm) override;
 
     /** Cause an exchange of Untimed Data to occur */
     void processLinkUntimedData() override;
@@ -54,6 +60,7 @@ public:
     ActivityQueue* registerRemoteLink(int tid, const std::string& name, Link* link) override;
 
     uint64_t getDataSize() const;
+
 
     // static void disable() { disabled = true; barrier.disable(); }
 
@@ -74,6 +81,9 @@ private:
     double                           totalWaitTime;
     bool                             single_rank;
     Core::ThreadSafe::Spinlock       lock;
+    static int                       sig_end_;
+    static int                       sig_usr_;
+    static int                       sig_alrm_;
 };
 
 } // namespace SST

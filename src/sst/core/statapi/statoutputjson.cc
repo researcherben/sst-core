@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -13,7 +13,6 @@
 
 #include "sst/core/statapi/statoutputjson.h"
 
-#include "sst/core/simulation_impl.h"
 #include "sst/core/statapi/statoutputcsv.h"
 #include "sst/core/stringize.h"
 
@@ -23,13 +22,14 @@ namespace Statistics {
 StatisticOutputJSON::StatisticOutputJSON(Params& outputParameters) : StatisticFieldsOutput(outputParameters)
 {
     // Announce this output object's name
-    Output& out = Simulation_impl::getSimulationOutput();
+    Output& out = getSimulationOutput();
     out.verbose(CALL_INFO, 1, 0, " : StatisticOutputJSON enabled...\n");
     setStatisticOutputName("StatisticOutputJSON");
 
     m_currentComponentName = "";
     m_firstEntry           = false;
     m_processedAnyStats    = false;
+    m_curIndentLevel       = 0;
 }
 
 bool
@@ -48,12 +48,9 @@ StatisticOutputJSON::checkOutputParameters()
     if ( true == foundKey ) { return false; }
 
     // Get the parameters
-    m_FilePath  = getOutputParameters().find<std::string>("filepath", "./StatisticOutput.json");
-    simTimeFlag = getOutputParameters().find<std::string>("outputsimtime", "1");
-    rankFlag    = getOutputParameters().find<std::string>("outputrank", "1");
-
-    m_outputSimTime = ("1" == simTimeFlag);
-    m_outputRank    = ("1" == rankFlag);
+    m_FilePath      = getOutputParameters().find<std::string>("filepath", "./StatisticOutput.json");
+    m_outputSimTime = getOutputParameters().find<bool>("outputsimtime", true);
+    m_outputRank    = getOutputParameters().find<bool>("outputrank", true);
 
     if ( 0 == m_FilePath.length() ) {
         // Filepath is zero length
@@ -85,8 +82,8 @@ StatisticOutputJSON::startOfSimulation()
     fprintf(m_hFile, "{\n");
     m_curIndentLevel++;
 
-    if ( 1 < Simulation_impl::getSimulation()->getNumRanks().rank ) {
-        const int thisRank = Simulation_impl::getSimulation()->getRank().rank;
+    if ( 1 < getNumRanks().rank ) {
+        const int thisRank = getRank().rank;
 
         printIndent();
         fprintf(m_hFile, "\"rank\" : %d,\n\n", thisRank);
@@ -139,6 +136,8 @@ StatisticOutputJSON::implStartOutputEntries(StatisticBase* statistic)
         m_curIndentLevel++;
         printIndent();
         fprintf(m_hFile, "\"name\" : \"%s\",\n", statistic->getCompName().c_str());
+        printIndent();
+        if ( m_outputSimTime ) { fprintf(m_hFile, "\"simtime\" : %" PRIu64 ",\n", getCurrentSimCycle()); }
 
         printIndent();
         fprintf(m_hFile, "\"statistics\" : [\n");
@@ -238,7 +237,7 @@ StatisticOutputJSON::openFile(void)
 
     if ( nullptr == m_hFile ) {
         // We got an error of some sort
-        Output out = Simulation_impl::getSimulation()->getSimulationOutput();
+        Output out = getSimulationOutput();
         out.fatal(
             CALL_INFO, 1, " : StatisticOutputJSON - Problem opening File %s - %s\n", m_FilePath.c_str(),
             strerror(errno));
@@ -260,6 +259,18 @@ StatisticOutputJSON::printIndent()
     for ( int i = 0; i < m_curIndentLevel; ++i ) {
         fprintf(m_hFile, "   ");
     }
+}
+
+void
+StatisticOutputJSON::serialize_order(SST::Core::Serialization::serializer& ser)
+{
+    StatisticFieldsOutput::serialize_order(ser);
+    ser& m_FilePath;
+    ser& m_outputSimTime;
+    ser& m_outputRank;
+    ser& m_firstEntry;
+    ser& m_firstField;
+    ser& m_processedAnyStats;
 }
 
 } // namespace Statistics

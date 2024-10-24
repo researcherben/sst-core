@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -53,14 +53,13 @@ PythonConfigGraphOutput::generateParams(const Params& params)
 }
 
 const std::string&
-PythonConfigGraphOutput::getLinkObject(LinkId_t id, bool no_cut)
+PythonConfigGraphOutput::getLinkObject(LinkId_t id, const std::string& name, bool no_cut)
 {
     if ( linkMap.find(id) == linkMap.end() ) {
-        char tmp[8 + 8 + 1];
-        snprintf(tmp, 8 + 8 + 1, "link_id_%08" PRIx32, id);
-        fprintf(outputFile, "%s = sst.Link(\"%s\")\n", tmp, tmp);
-        if ( no_cut ) fprintf(outputFile, "%s.setNoCut()\n", tmp);
-        linkMap[id] = tmp;
+        char* pyLinkName = makePythonSafeWithPrefix(name.c_str(), "link_");
+        fprintf(outputFile, "%s = sst.Link(\"%s\")\n", pyLinkName, name.c_str());
+        if ( no_cut ) fprintf(outputFile, "%s.setNoCut()\n", pyLinkName);
+        linkMap[id] = pyLinkName;
     }
     return linkMap[id];
 }
@@ -114,7 +113,7 @@ PythonConfigGraphOutput::generateCommonComponent(const char* objName, const Conf
         std::string       latencyStr = link->latency_str[idx];
         char*             esPortName = makeEscapeSafe(link->port[idx].c_str());
 
-        const std::string& linkName = getLinkObject(linkID, link->no_cut);
+        const std::string& linkName = getLinkObject(linkID, link->name, link->no_cut);
         fprintf(
             outputFile, "%s.addLink(%s, \"%s\", \"%s\")\n", objName, linkName.c_str(), esPortName,
             tmp.toStringBestSI().c_str());
@@ -230,7 +229,10 @@ PythonConfigGraphOutput::generate(const Config* cfg, ConfigGraph* graph)
         outputFile, "sst.setProgramOption(\"print-timing-info\", \"%s\")\n", cfg->print_timing() ? "true" : "false");
     // Ignore stopAfter for now
     // fprintf(outputFile, "sst.setProgramOption(\"stopAfter\", \"%" PRIu32 "\")\n", cfg->stopAfterSec);
-    fprintf(outputFile, "sst.setProgramOption(\"heartbeat-period\", \"%s\")\n", cfg->heartbeatPeriod().c_str());
+    fprintf(
+        outputFile, "sst.setProgramOption(\"heartbeat-sim-period\", \"%s\")\n", cfg->heartbeat_sim_period().c_str());
+    fprintf(
+        outputFile, "sst.setProgramOption(\"heartbeat-wall-period\", \"%" PRIu32 "\")\n", cfg->heartbeat_wall_period());
     fprintf(outputFile, "sst.setProgramOption(\"timebase\", \"%s\")\n", cfg->timeBase().c_str());
     fprintf(outputFile, "sst.setProgramOption(\"partitioner\", \"%s\")\n", cfg->partitioner().c_str());
     fprintf(outputFile, "sst.setProgramOption(\"timeVortex\", \"%s\")\n", cfg->timeVortex().c_str());
@@ -238,6 +240,12 @@ PythonConfigGraphOutput::generate(const Config* cfg, ConfigGraph* graph)
         outputFile, "sst.setProgramOption(\"interthread-links\", \"%s\")\n",
         cfg->interthread_links() ? "true" : "false");
     fprintf(outputFile, "sst.setProgramOption(\"output-prefix-core\", \"%s\")\n", cfg->output_core_prefix().c_str());
+
+    fprintf(
+        outputFile, "sst.setProgramOption(\"checkpoint-sim-period\", \"%s\")\n", cfg->checkpoint_sim_period().c_str());
+    fprintf(
+        outputFile, "sst.setProgramOption(\"checkpoint-wall-period\", \"%" PRIu32 "\")\n",
+        cfg->checkpoint_wall_period());
 
     // Output the global params
     fprintf(outputFile, "# Define the global parameter sets:\n");

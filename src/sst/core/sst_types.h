@@ -1,8 +1,8 @@
-// Copyright 2009-2023 NTESS. Under the terms
+// Copyright 2009-2024 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2009-2023, NTESS
+// Copyright (c) 2009-2024, NTESS
 // All rights reserved.
 //
 // This file is part of the SST software package. For license
@@ -24,6 +24,8 @@ typedef uint64_t HandlerId_t;
 typedef uint64_t Cycle_t;
 typedef uint64_t SimTime_t;
 typedef double   Time_t;
+
+#define PRI_SIMTIME PRIu64
 
 static constexpr StatisticId_t STATALL_ID = std::numeric_limits<StatisticId_t>::max();
 
